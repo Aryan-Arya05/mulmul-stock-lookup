@@ -24,10 +24,10 @@ async function vin(path, body, attempt = 1) {
       ApiOwner: VINCULUM_API_OWNER,
       ApiKey: VINCULUM_API_KEY,
       RequestBody: json,
-      "Content-Type": "application/x-www-form-urlencoded",
+      "Content-Type": "application/json",
       Accept: "application/json",
     },
-    body: new URLSearchParams({ RequestBody: json }),
+    body: json,
   });
   const text = await r.text();
   let data;

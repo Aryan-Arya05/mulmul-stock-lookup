@@ -8,11 +8,15 @@ on:
         description: "Re-fetch all SKU details from Vinculum"
         type: boolean
         default: false
+      backfill_days:
+        description: "Backfill: walk back this many days (0 = incremental last 7 days)"
+        type: string
+        default: "0"
 concurrency: { group: vinculum-sync, cancel-in-progress: false }
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -24,3 +28,4 @@ jobs:
           SUPABASE_URL: https://idhtjxirqvaensqhozdc.supabase.co
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           FULL_SKU_REFRESH: ${{ inputs.full_sku_refresh == true && '1' || '' }}
+          BACKFILL_DAYS: ${{ inputs.backfill_days || '0' }}

@@ -5,7 +5,7 @@
 // 3. Rows not seen in this run are deleted, so sold-out SKUs disappear instead of going stale.
 //
 // Env: VINCULUM_API_KEY, VINCULUM_API_OWNER, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
-// Optional: VINCULUM_BASE (default https://mulmul.vineretail.com/RestWS/api/eretail), FULL_SKU_REFRESH=1
+// Optional: VINCULUM_BASE, FULL_SKU_REFRESH=1, BACKFILL_DAYS=n (walk back n days in 7-day windows; also purges rows not seen)
 
 const VIN_BASE = process.env.VINCULUM_BASE || "https://mulmul.vineretail.com/RestWS/api/eretail";
 const { VINCULUM_API_KEY, VINCULUM_API_OWNER, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = process.env;
@@ -43,15 +43,15 @@ async function vin(path, body, attempt = 1) {
   return data;
 }
 
-async function fetchWhInventory() {
+const fmt = d => `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}:${String(d.getSeconds()).padStart(2,"0")}`;
+
+// getWhInventory only returns SKUs whose stock changed inside a window of <= 7 days,
+// and for each such SKU returns every location/bucket with its CURRENT qty (zeros included).
+async function fetchWhWindow(from, to, locSeen, buckets) {
   const rows = [];
-  const locSeen = new Map();
-  const buckets = new Map();
   for (let page = 1; ; page++) {
     const data = await vin("v4/stock/getWhInventory", {
-      skuCodes: [], buckets: [],
-      fromDate: "01/01/2015 00:00:00",
-      toDate: "31/12/2099 23:59:00",
+      skuCodes: [], buckets: [], fromDate: fmt(from), toDate: fmt(to),
       pageNumber: String(page), reqType: "", locCode: "",
     });
     const list = data.response || [];
@@ -59,22 +59,33 @@ async function fetchWhInventory() {
       locSeen.set(r.location, (locSeen.get(r.location) || 0) + 1);
       buckets.set(r.bucket, (buckets.get(r.bucket) || 0) + 1);
       if (String(r.bucket).toLowerCase() !== "good") continue;
-      const qty = Math.round(Number(r.qty || 0) - Number(r.committedQty || 0));
-      if (qty <= 0) continue;
+      const qty = Math.max(0, Math.round(Number(r.qty || 0) - Number(r.committedQty || 0)));
       rows.push({ sku: String(r.skuCode).trim().toUpperCase(), location_code: r.location, bin: "", qty });
     }
-    log(`getWhInventory page ${page}: ${list.length} rows, hasMore=${data.hasMore}`);
     if (!data.hasMore || list.length === 0) break;
     if (page > 2000) throw new Error("pagination runaway");
   }
-  log("locations seen:", Object.fromEntries(locSeen));
-  log("buckets seen:", Object.fromEntries(buckets));
-  // merge duplicates (same sku+location can repeat across pages)
-  const merged = new Map();
-  for (const r of rows) {
-    const k = `${r.sku}|${r.location_code}|${r.bin}`;
-    merged.set(k, merged.has(k) ? { ...r, qty: merged.get(k).qty + r.qty } : r);
+  return rows;
+}
+
+async function fetchWhInventory(backfillDays) {
+  const locSeen = new Map(), buckets = new Map();
+  const merged = new Map();            // later windows overwrite earlier ones
+  const now = new Date();
+  const totalDays = Math.max(7, backfillDays || 7);
+  let from = new Date(now.getTime() - totalDays * 86400e3);
+  let windows = 0;
+  while (from < now) {
+    const to = new Date(Math.min(now.getTime(), from.getTime() + 7 * 86400e3 - 1000));
+    const rows = await fetchWhWindow(from, to, locSeen, buckets);
+    for (const r of rows) merged.set(`${r.sku}|${r.location_code}|${r.bin}`, r);
+    windows++;
+    if (windows % 10 === 0 || rows.length) log(`window ${fmt(from).slice(0,10)} → ${fmt(to).slice(0,10)}: ${rows.length} good rows (cumulative ${merged.size})`);
+    from = new Date(to.getTime() + 1000);
+    await sleep(120);
   }
+  log(`windows: ${windows}; locations seen:`, Object.fromEntries(locSeen));
+  log("buckets seen:", Object.fromEntries(buckets));
   return [...merged.values()];
 }
 
@@ -143,7 +154,9 @@ const [run] = await sb("sync_runs", { method: "POST", body: { started_at: runSta
 try {
   const knownLocs = new Set((await sb("locations?select=code")).map(l => l.code));
 
-  const inv = await fetchWhInventory();
+  const backfillDays = Number(process.env.BACKFILL_DAYS || 0);
+  log(backfillDays ? `BACKFILL ${backfillDays} days` : "incremental: last 7 days");
+  const inv = await fetchWhInventory(backfillDays);
   const unknown = [...new Set(inv.filter(r => !knownLocs.has(r.location_code)).map(r => r.location_code))];
   if (unknown.length) log("WARNING: inventory rows for locations not in master, skipped:", unknown);
   const invRows = inv.filter(r => knownLocs.has(r.location_code)).map(r => ({ ...r, synced_at: runStart }));
@@ -171,9 +184,8 @@ try {
     if (stubs.length) { log(`stub products: ${stubs.length}`); await upsert("products", stubs, "sku"); }
   }
 
-  await upsert("inventory", invRows, "sku,location_code,bin");
-  // remove anything not seen this run
-  await sb(`inventory?synced_at=lt.${encodeURIComponent(runStart)}`, { method: "DELETE", prefer: "return=minimal" });
+  await upsert("inventory", invRows, "sku,location_code,bin");   // zero-qty rows included; v_stock hides them
+  if (backfillDays) await sb(`inventory?synced_at=lt.${encodeURIComponent(runStart)}`, { method: "DELETE", prefer: "return=minimal" });
 
   await sb(`sync_runs?id=eq.${run.id}`, { method: "PATCH", body: { status: "ok", finished_at: new Date().toISOString(), rows_upserted: invRows.length } });
   log("done");

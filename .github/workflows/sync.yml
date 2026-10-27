@@ -1,0 +1,26 @@
+name: Sync Vinculum stock
+on:
+  schedule:
+    - cron: "*/30 * * * *"     # every 30 min (UTC)
+  workflow_dispatch:
+    inputs:
+      full_sku_refresh:
+        description: "Re-fetch all SKU details from Vinculum"
+        type: boolean
+        default: false
+concurrency: { group: vinculum-sync, cancel-in-progress: false }
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: node scripts/sync-vinculum.mjs
+        env:
+          VINCULUM_API_KEY: ${{ secrets.VINCULUM_API_KEY }}
+          VINCULUM_API_OWNER: ${{ secrets.VINCULUM_API_OWNER }}
+          SUPABASE_URL: https://idhtjxirqvaensqhozdc.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          FULL_SKU_REFRESH: ${{ inputs.full_sku_refresh == true && '1' || '' }}

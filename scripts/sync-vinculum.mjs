@@ -16,8 +16,13 @@ const log = (...a) => console.log(new Date().toISOString(), ...a);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // ---------- Vinculum ----------
+let lastCall = 0;
+const MIN_GAP_MS = Number(process.env.VINCULUM_MIN_GAP_MS || 1000);
 async function vin(path, body, attempt = 1) {
   const json = JSON.stringify(body);
+  const wait = lastCall + MIN_GAP_MS - Date.now();
+  if (wait > 0) await sleep(wait);
+  lastCall = Date.now();
   const r = await fetch(`${VIN_BASE}/${path}`, {
     method: "POST",
     headers: {
@@ -33,6 +38,12 @@ async function vin(path, body, attempt = 1) {
   let data;
   try { data = JSON.parse(text); } catch { data = null; }
   if (data && Number(data.responseCode) === 1105) return { ...data, response: [], hasMore: false }; // "No Record Found" = empty page
+  if (data && Number(data.responseCode) === 13) {                                                   // "API Hit Quota Exceeded"
+    if (attempt > 6) throw new Error(`Vinculum ${path}: quota exceeded, gave up after ${attempt - 1} waits`);
+    log(`vinculum quota hit on ${path}; waiting 65s (attempt ${attempt})`);
+    await sleep(65000);
+    return vin(path, body, attempt + 1);
+  }
   if (!r.ok || !data || Number(data.responseCode) !== 0) {
     if (attempt < 4 && (r.status >= 500 || r.status === 429 || !data)) {
       log(`vinculum ${path} attempt ${attempt} failed (${r.status}); retrying`);

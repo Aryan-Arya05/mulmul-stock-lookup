@@ -67,7 +67,7 @@ const fmt = d => `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1
 // getWhInventory only returns SKUs whose stock changed inside a window of <= 7 days,
 // and for each such SKU returns every location/bucket with its CURRENT qty (zeros included).
 async function fetchWhWindow(from, to, locSeen, buckets) {
-  const rows = [];
+  const agg = new Map();   // same sku+location can appear several times in a window (lots/bins): sum them
   for (let page = 1; ; page++) {
     const data = await vin("v4/stock/getWhInventory", {
       skuCodes: [], buckets: [], fromDate: fmt(from), toDate: fmt(to),
@@ -79,13 +79,15 @@ async function fetchWhWindow(from, to, locSeen, buckets) {
       buckets.set(r.bucket, (buckets.get(r.bucket) || 0) + 1);
       if (String(r.bucket).toLowerCase() !== "good") continue;
       const qty = Math.max(0, Math.round(Number(r.qty || 0) - Number(r.committedQty || 0)));
-      rows.push({ sku: String(r.skuCode).trim().toUpperCase(), location_code: r.location, bin: "", qty });
+      const sku = String(r.skuCode).trim().toUpperCase(), k = `${sku}|${r.location}`;
+      const prev = agg.get(k);
+      if (prev) prev.qty += qty; else agg.set(k, { sku, location_code: r.location, bin: "", qty });
     }
-    if (globalThis.onPage) await globalThis.onPage(`${fmt(from).slice(0,10)}→${fmt(to).slice(0,10)} page ${page}: ${list.length} rows, hasMore=${data.hasMore}, good so far ${rows.length}`);
+    if (globalThis.onPage) await globalThis.onPage(`${fmt(from).slice(0,10)}→${fmt(to).slice(0,10)} page ${page}: ${list.length} rows, hasMore=${data.hasMore}, good so far ${agg.size}`);
     if (!data.hasMore || list.length === 0) break;
     if (page > 20000) throw new Error("pagination runaway");
   }
-  return rows;
+  return [...agg.values()];
 }
 
 async function fetchWhInventory(backfillDays, onWindow) {

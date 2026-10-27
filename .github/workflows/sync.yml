@@ -1,7 +1,7 @@
 name: Sync Vinculum stock
 on:
   schedule:
-    - cron: "*/30 * * * *"     # every 30 min (UTC)
+    - cron: "7 * * * *"        # hourly (a 7-day window takes 15-25 min at Vinculum's page speed)
   workflow_dispatch:
     inputs:
       full_sku_refresh:

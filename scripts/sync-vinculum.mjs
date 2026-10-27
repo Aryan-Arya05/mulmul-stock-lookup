@@ -32,6 +32,7 @@ async function vin(path, body, attempt = 1) {
   const text = await r.text();
   let data;
   try { data = JSON.parse(text); } catch { data = null; }
+  if (data && Number(data.responseCode) === 1105) return { ...data, response: [], hasMore: false }; // "No Record Found" = empty page
   if (!r.ok || !data || Number(data.responseCode) !== 0) {
     if (attempt < 4 && (r.status >= 500 || r.status === 429 || !data)) {
       log(`vinculum ${path} attempt ${attempt} failed (${r.status}); retrying`);

@@ -223,7 +223,7 @@ try {
   // inventory rows were written per window above; final pass guarantees the merged latest state
   // Merge rule: the API's "good" qty per sku+location is the TOTAL across bins (physical + VIRTUAL-* + INTRANSIT).
   // Virtual/transit rows come from the panel export (load-base) and are kept; physical = API total - those.
-  const VIRT = ["VIRTUAL-PRODUCTION", "VIRTUAL", "INTRANSIT"];
+  const VIRT = ["VIRTUAL-PRODUCTION", "VIRTUAL", "INTRANSIT", "VIR-STORE"];
   const virtQty = new Map();
   const pairs = [...new Set(invRows.map(r => r.sku))];
   for (let i = 0; i < pairs.length; i += 300) {

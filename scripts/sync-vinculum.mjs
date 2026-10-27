@@ -18,8 +18,10 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 // ---------- Vinculum ----------
 let lastCall = 0;
 const MIN_GAP_MS = Number(process.env.VINCULUM_MIN_GAP_MS || 1000);
+const formStyle = new Set();   // endpoints that rejected JSON (415) and want RequestBody as form field
 async function vin(path, body, attempt = 1) {
   const json = JSON.stringify(body);
+  const asForm = formStyle.has(path);
   const wait = lastCall + MIN_GAP_MS - Date.now();
   if (wait > 0) await sleep(wait);
   lastCall = Date.now();
@@ -32,15 +34,16 @@ async function vin(path, body, attempt = 1) {
       ApiOwner: VINCULUM_API_OWNER,
       ApiKey: VINCULUM_API_KEY,
       RequestBody: json,
-      "Content-Type": "application/json",
+      "Content-Type": asForm ? "application/x-www-form-urlencoded" : "application/json",
       Accept: "application/json",
     },
-    body: json,
+    body: asForm ? new URLSearchParams({ RequestBody: json }).toString() : json,
     });
   } catch (e) {
     if (attempt < 4) { log(`vinculum ${path} attempt ${attempt}: ${e.name} ${e.message}; retrying`); await sleep(5000 * attempt); return vin(path, body, attempt + 1); }
     throw new Error(`Vinculum ${path} unreachable: ${e.name} ${e.message}`);
   }
+  if (r.status === 415 && !asForm) { formStyle.add(path); log(`${path}: 415 on JSON, switching to form encoding`); return vin(path, body, attempt); }
   const text = await r.text();
   let data;
   try { data = JSON.parse(text); } catch { data = null; }

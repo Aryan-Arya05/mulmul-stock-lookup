@@ -80,7 +80,7 @@ async function fetchWhWindow(from, to, locSeen, buckets) {
   return rows;
 }
 
-async function fetchWhInventory(backfillDays) {
+async function fetchWhInventory(backfillDays, onWindow) {
   const locSeen = new Map(), buckets = new Map();
   const merged = new Map();            // later windows overwrite earlier ones
   const now = new Date();
@@ -92,12 +92,11 @@ async function fetchWhInventory(backfillDays) {
     const rows = await fetchWhWindow(from, to, locSeen, buckets);
     for (const r of rows) merged.set(`${r.sku}|${r.location_code}|${r.bin}`, r);
     windows++;
-    if (windows % 10 === 0 || rows.length) log(`window ${fmt(from).slice(0,10)} → ${fmt(to).slice(0,10)}: ${rows.length} good rows (cumulative ${merged.size})`);
+    if (onWindow) await onWindow(rows, `window ${windows} ${fmt(from).slice(0,10)}→${fmt(to).slice(0,10)}: ${rows.length} rows (cumulative ${merged.size})`);
     from = new Date(to.getTime() + 1000);
     await sleep(120);
   }
-  log(`windows: ${windows}; locations seen:`, Object.fromEntries(locSeen));
-  log("buckets seen:", Object.fromEntries(buckets));
+  if (onWindow) await onWindow([], `fetched ${windows} windows; locations ${JSON.stringify(Object.fromEntries(locSeen))}; buckets ${JSON.stringify(Object.fromEntries(buckets))}`, true);
   return [...merged.values()];
 }
 
@@ -108,7 +107,7 @@ function parseStyle(sku, parent) {
 }
 const titleCase = s => String(s || "").toLowerCase().replace(/\b\w/g, c => c.toUpperCase()).trim();
 
-async function fetchSkuDetails(skus) {
+async function fetchSkuDetails(skus, onProgress) {
   const out = [];
   for (let i = 0; i < skus.length; i += 50) {
     const batch = skus.slice(i, i + 50);
@@ -132,7 +131,7 @@ async function fetchSkuDetails(skus) {
         updated_at: new Date().toISOString(),
       });
     }
-    log(`skuDetail ${i + batch.length}/${skus.length}`);
+    if (onProgress) await onProgress(`skuDetail ${i + batch.length}/${skus.length}`);
     await sleep(150);
   }
   return out;
@@ -163,12 +162,23 @@ async function upsert(table, rows, onConflict) {
 // ---------- main ----------
 const runStart = new Date().toISOString();
 const [run] = await sb("sync_runs", { method: "POST", body: { started_at: runStart, status: "running" }, prefer: "return=representation" });
+let lastProgress = 0;
+async function progress(msg, force) {
+  log(msg);
+  if (!force && Date.now() - lastProgress < 20000) return;
+  lastProgress = Date.now();
+  await sb(`sync_runs?id=eq.${run.id}`, { method: "PATCH", body: { progress: msg.slice(0, 500) } }).catch(() => {});
+}
 try {
   const knownLocs = new Set((await sb("locations?select=code")).map(l => l.code));
 
   const backfillDays = Number(process.env.BACKFILL_DAYS || 0);
   log(backfillDays ? `BACKFILL ${backfillDays} days` : "incremental: last 7 days");
-  const inv = await fetchWhInventory(backfillDays);
+  const inv = await fetchWhInventory(backfillDays, async (rows, msg, force) => {
+    const ok = rows.filter(r => knownLocs.has(r.location_code)).map(r => ({ ...r, synced_at: runStart }));
+    if (ok.length) await upsert("inventory", ok, "sku,location_code,bin");
+    await progress(msg, force);
+  });
   const unknown = [...new Set(inv.filter(r => !knownLocs.has(r.location_code)).map(r => r.location_code))];
   if (unknown.length) log("WARNING: inventory rows for locations not in master, skipped:", unknown);
   const invRows = inv.filter(r => knownLocs.has(r.location_code)).map(r => ({ ...r, synced_at: runStart }));
@@ -188,7 +198,7 @@ try {
   }
   log(`SKU details to fetch: ${need.length}`);
   if (need.length) {
-    const prods = await fetchSkuDetails(need);
+    const prods = await fetchSkuDetails(need, progress);
     await upsert("products", prods, "sku");
     // SKUs Vinculum returned nothing for: insert a stub so the app can still show the code
     const got = new Set(prods.map(p => p.sku));
@@ -196,7 +206,8 @@ try {
     if (stubs.length) { log(`stub products: ${stubs.length}`); await upsert("products", stubs, "sku"); }
   }
 
-  await upsert("inventory", invRows, "sku,location_code,bin");   // zero-qty rows included; v_stock hides them
+  // inventory rows were written per window above; final pass guarantees the merged latest state
+  await upsert("inventory", invRows, "sku,location_code,bin");
   if (backfillDays) await sb(`inventory?synced_at=lt.${encodeURIComponent(runStart)}`, { method: "DELETE", prefer: "return=minimal" });
 
   await sb(`sync_runs?id=eq.${run.id}`, { method: "PATCH", body: { status: "ok", finished_at: new Date().toISOString(), rows_upserted: invRows.length } });

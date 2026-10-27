@@ -191,8 +191,6 @@ try {
   const backfillDays = Number(process.env.BACKFILL_DAYS || 0);
   log(backfillDays ? `BACKFILL ${backfillDays} days` : "incremental: last 7 days");
   const inv = await fetchWhInventory(backfillDays, async (rows, msg, force) => {
-    const ok = rows.filter(r => knownLocs.has(r.location_code)).map(r => ({ ...r, synced_at: runStart }));
-    if (ok.length) await upsert("inventory", ok, "sku,location_code,bin");
     await progress(msg, force);
   });
   const unknown = [...new Set(inv.filter(r => !knownLocs.has(r.location_code)).map(r => r.location_code))];
@@ -223,9 +221,26 @@ try {
   }
 
   // inventory rows were written per window above; final pass guarantees the merged latest state
-  await upsert("inventory", invRows, "sku,location_code,bin");
-  if (backfillDays) await sb(`inventory?synced_at=lt.${encodeURIComponent(runStart)}`, { method: "DELETE", prefer: "return=minimal" });
-
+  // Merge rule: the API's "good" qty per sku+location is the TOTAL across bins (physical + VIRTUAL-* + INTRANSIT).
+  // Virtual/transit rows come from the panel export (load-base) and are kept; physical = API total - those.
+  const VIRT = ["VIRTUAL-PRODUCTION", "VIRTUAL", "INTRANSIT"];
+  const virtQty = new Map();
+  const pairs = [...new Set(invRows.map(r => r.sku))];
+  for (let i = 0; i < pairs.length; i += 300) {
+    const chunk = pairs.slice(i, i + 300);
+    const got = await sb(`inventory?select=sku,location_code,bin,qty&bin=in.(${VIRT.map(b => `"${b}"`).join(",")})&sku=in.(${chunk.map(s => `"${s}"`).join(",")})`);
+    for (const g of got) { const k = `${g.sku}|${g.location_code}`; virtQty.set(k, (virtQty.get(k) || 0) + g.qty); }
+  }
+  const physRows = invRows.map(r => ({ ...r, bin: "PHYSICAL", qty: Math.max(0, r.qty - (virtQty.get(`${r.sku}|${r.location_code}`) || 0)) }));
+  await upsert("inventory", physRows.map(r => ({ ...r, synced_at: runStart })), "sku,location_code,bin");
+  // drop the export's per-bin physical rows for these sku+location pairs (now superseded by PHYSICAL)
+  const byLoc = new Map();
+  for (const r of physRows) { if (!byLoc.has(r.location_code)) byLoc.set(r.location_code, []); byLoc.get(r.location_code).push(r.sku); }
+  for (const [loc, skus] of byLoc) for (let i = 0; i < skus.length; i += 300) {
+    const chunk = skus.slice(i, i + 300);
+    await sb(`inventory?location_code=eq.${loc}&bin=not.in.(${[...VIRT, "PHYSICAL"].map(b => `"${b}"`).join(",")})&sku=in.(${chunk.map(s => `"${s}"`).join(",")})`, { method: "DELETE", prefer: "return=minimal" });
+  }
+  if (backfillDays) log("backfill mode: no purge (base comes from load-base)");
   await sb(`sync_runs?id=eq.${run.id}`, { method: "PATCH", body: { status: "ok", finished_at: new Date().toISOString(), rows_upserted: invRows.length } });
   log("done");
 } catch (e) {

@@ -19,7 +19,7 @@
   --bg:#f6f5f1; --card:#ffffff; --fg:#1b1f2a; --muted:#6b7080; --line:#e3e1da;
   --accent:#1f2a44; --accent-fg:#ffffff;
   --ok:#1d7a4a; --ok-bg:#e6f4ec; --warn:#9a6a00; --warn-bg:#fbf1d6; --none:#8a8f9c; --none-bg:#eeeeea;
-  --prod:#5b3a8c; --prod-bg:#efe8f8;
+  --prod:#5b3a8c; --prod-bg:#efe8f8; --transit:#0b6e8f; --transit-bg:#e2f1f7;
   --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
   --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
   color-scheme:light;
@@ -28,7 +28,7 @@
   :root{ --bg:#14161c; --card:#1d2029; --fg:#eef0f4; --muted:#9aa0ae; --line:#2c303b;
     --accent:#c9d4ee; --accent-fg:#14161c;
     --ok:#6fd49a; --ok-bg:#16301f; --warn:#f0c15a; --warn-bg:#3a2d10; --none:#8a8f9c; --none-bg:#262932;
-    --prod:#c8aef0; --prod-bg:#2b2240; color-scheme:dark; }
+    --prod:#c8aef0; --prod-bg:#2b2240; --transit:#7fcbe8; --transit-bg:#10303d; color-scheme:dark; }
 }
 *{box-sizing:border-box}
 html,body{height:100%}
@@ -111,6 +111,9 @@ td .p{color:var(--prod);font-size:11px;display:block;line-height:1}
 .tile b{display:block;font-size:22px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.1}
 .tile span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
 .tile.prod b{color:var(--prod)}
+.tile.transit b{color:var(--transit)}
+td .t{color:var(--transit);font-size:11px;display:block;line-height:1}
+.legend em{font-style:normal;color:var(--transit)}
 
 /* scanner */
 .sheet{position:fixed;inset:0;background:#000;z-index:20;display:none;flex-direction:column}
@@ -309,8 +312,8 @@ async function showStyle(style, sku) {
   const colours = [...new Set(prods.map(p => p.colour || "—"))];
   const sizes = [...new Set(prods.map(p => p.size || "—"))].sort((a,b) => sizeIdx(a)-sizeIdx(b));
   const bySku = {};
-  for (const p of prods) bySku[p.sku] = { ...p, avail: 0, prod: 0 };
-  for (const s of stock) { const r = bySku[s.sku] || (bySku[s.sku] = { sku: s.sku, colour: s.colour, size: s.size, avail: 0, prod: 0 }); if (s.bucket === "production") r.prod += s.qty; else r.avail += s.qty; }
+  for (const p of prods) bySku[p.sku] = { ...p, avail: 0, prod: 0, transit: 0 };
+  for (const s of stock) { const r = bySku[s.sku] || (bySku[s.sku] = { sku: s.sku, colour: s.colour, size: s.size, avail: 0, prod: 0, transit: 0 }); if (s.bucket === "production") r.prod += s.qty; else if (s.bucket === "transit") r.transit += s.qty; else r.avail += s.qty; }
 
   // matrix colour × size
   let matrix = `<div class="matrix"><table><thead><tr><th>Colour</th>${sizes.map(s=>`<th>${esc(s)}</th>`).join("")}</tr></thead><tbody>`;
@@ -319,18 +322,20 @@ async function showStyle(style, sku) {
       const r = Object.values(bySku).find(x => (x.colour||"—")===c && (x.size||"—")===sz);
       if (!r) return `<td class="z">·</td>`;
       const sel = r.sku === sku ? " sel" : "";
-      return `<td class="${r.avail?"":"z"}${sel}" data-sku="${esc(r.sku)}">${r.avail}${r.prod?`<span class="p">+${r.prod}</span>`:""}</td>`;
+      return `<td class="${r.avail?"":"z"}${sel}" data-sku="${esc(r.sku)}">${r.avail}${r.transit?`<span class="t">→${r.transit}</span>`:""}${r.prod?`<span class="p">+${r.prod}</span>`:""}</td>`;
     }).join("") + `</tr>`;
   }
-  matrix += `</tbody></table></div><div class="legend">Available pieces across all locations. <i>+n</i> = in production.</div>`;
+  matrix += `</tbody></table></div><div class="legend">Available pieces across all locations. <em>→n</em> = in transit, <i>+n</i> = in production.</div>`;
 
   // selected variant (or whole style) location breakdown
   const rows = sku ? stock.filter(s => s.sku === sku) : stock;
   const agg = {};
   for (const s of rows) { const k = s.location_code; agg[k] = agg[k] || { ...s, qty: 0, bins: {} }; agg[k].qty += s.qty; agg[k].bins[s.bucket] = (agg[k].bins[s.bucket]||0) + s.qty; }
   const prodQty = rows.filter(s=>s.bucket==="production").reduce((a,s)=>a+s.qty,0);
+  const transitQty = rows.filter(s=>s.bucket==="transit").reduce((a,s)=>a+s.qty,0);
   const whRows = Object.values(agg).filter(a => a.location_type==="WH" && (a.bins.warehouse||0) > 0).map(a => ({...a, qty: a.bins.warehouse}));
-  const stRows = Object.values(agg).filter(a => a.location_type==="Store").sort((a,b)=> (a.location_code===myStore?-1:b.location_code===myStore?1:0) || b.qty-a.qty);
+  const stRows = Object.values(agg).filter(a => a.location_type==="Store" && (a.bins.store||0) > 0).map(a => ({...a, qty: a.bins.store})).sort((a,b)=> (a.location_code===myStore?-1:b.location_code===myStore?1:0) || b.qty-a.qty);
+  const trRows = Object.values(agg).filter(a => (a.bins.transit||0) > 0).map(a => ({...a, qty: a.bins.transit})).sort((a,b)=> (a.location_code===myStore?-1:b.location_code===myStore?1:0) || b.qty-a.qty);
   const mine = stRows.find(a => a.location_code===myStore);
   const availTotal = whRows.reduce((a,r)=>a+r.qty,0) + stRows.reduce((a,r)=>a+r.qty,0);
   const sel = sku ? bySku[sku] : null;
@@ -347,10 +352,12 @@ async function showStyle(style, sku) {
     <div class="total">
       <div class="tile"><b>${mine ? mine.qty : 0}</b><span>${myStore ? "Your store" : "Pick store"}</span></div>
       <div class="tile"><b>${availTotal}</b><span>Available total</span></div>
+      ${transitQty ? `<div class="tile transit"><b>${transitQty}</b><span>In transit</span></div>` : ""}
       <div class="tile prod"><b>${prodQty}</b><span>In production</span></div>
     </div>
     ${bucket("Warehouse", whRows, "None in warehouse")}
     ${bucket("Stores", stRows, "Not in any store")}
+    ${transitQty ? bucket("In transit (dispatched from warehouse)", trRows, "") : ""}
     ${bucket("In production", prodQty ? [{location_name:"Chhatarpur (virtual)", location_code:"MWH", qty:prodQty}] : [], "Nothing in production")}
   </div>`;
   window.scrollTo(0,0);

@@ -25,7 +25,7 @@ jobs:
         env:
           VINCULUM_API_KEY: ${{ secrets.VINCULUM_API_KEY }}
           VINCULUM_API_OWNER: ${{ secrets.VINCULUM_API_OWNER }}
-          VINCULUM_ORG_ID: ${{ secrets.VINCULUM_ORG_ID }}
+          VINCULUM_ORG_ID: MULM
           SUPABASE_URL: https://idhtjxirqvaensqhozdc.supabase.co
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           FULL_SKU_REFRESH: ${{ inputs.full_sku_refresh == true && '1' || '' }}

@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f2a44">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Mulmul Stock">
+<title>Mulmul Stock Lookup</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+/* Layout: one column, sticky search bar, result cards grouped by bucket. Built for a 5–6" phone held in one hand. */
+:root{
+  --bg:#f6f5f1; --card:#ffffff; --fg:#1b1f2a; --muted:#6b7080; --line:#e3e1da;
+  --accent:#1f2a44; --accent-fg:#ffffff;
+  --ok:#1d7a4a; --ok-bg:#e6f4ec; --warn:#9a6a00; --warn-bg:#fbf1d6; --none:#8a8f9c; --none-bg:#eeeeea;
+  --prod:#5b3a8c; --prod-bg:#efe8f8;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root{ --bg:#14161c; --card:#1d2029; --fg:#eef0f4; --muted:#9aa0ae; --line:#2c303b;
+    --accent:#c9d4ee; --accent-fg:#14161c;
+    --ok:#6fd49a; --ok-bg:#16301f; --warn:#f0c15a; --warn-bg:#3a2d10; --none:#8a8f9c; --none-bg:#262932;
+    --prod:#c8aef0; --prod-bg:#2b2240; color-scheme:dark; }
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 var(--sans);-webkit-font-smoothing:antialiased}
+button,input{font:inherit;color:inherit}
+button{cursor:pointer}
+.app{max-width:640px;margin:0 auto;min-height:100%;display:flex;flex-direction:column}
+
+header{position:sticky;top:0;z-index:5;background:var(--bg);padding:calc(10px + env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) 10px max(16px,env(safe-area-inset-left,0px));border-bottom:1px solid var(--line)}
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
+.brand{font-weight:600;letter-spacing:.04em;text-transform:uppercase;font-size:12px;color:var(--muted)}
+.store-btn{border:1px solid var(--line);background:var(--card);border-radius:999px;padding:5px 12px;font-size:13px;font-weight:500;display:flex;gap:6px;align-items:center;max-width:60%}
+.store-btn span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.searchrow{display:flex;gap:8px}
+.search{flex:1;display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:0 12px;min-width:0}
+.search input{flex:1;border:0;background:transparent;padding:12px 0;outline:none;min-width:0;font-size:16px}
+.search input::placeholder{color:var(--muted)}
+.clear{border:0;background:transparent;color:var(--muted);padding:6px;display:none}
+.search.has .clear{display:block}
+.scan-btn{border:0;background:var(--accent);color:var(--accent-fg);border-radius:12px;padding:0 14px;font-weight:600;display:flex;align-items:center;gap:6px;white-space:nowrap}
+.scan-btn svg{width:20px;height:20px}
+.fresh{font-size:12px;color:var(--muted);margin-top:8px;display:flex;gap:6px;align-items:center}
+.fresh .dot{width:7px;height:7px;border-radius:50%;background:var(--ok)}
+.fresh.stale .dot{background:var(--warn)}
+.fresh.sample .dot{background:var(--none)}
+
+main{flex:1;padding:12px max(16px,env(safe-area-inset-right,0px)) calc(32px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
+.hint{color:var(--muted);text-align:center;padding:48px 16px;line-height:1.6}
+.hint b{color:var(--fg);display:block;font-size:17px;margin-bottom:6px;font-weight:600}
+.hint code{font-family:var(--mono);font-size:13px;background:var(--card);border:1px solid var(--line);padding:1px 6px;border-radius:6px}
+
+.results{display:flex;flex-direction:column;gap:8px}
+.row{display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;text-align:left;width:100%}
+.row .name{font-weight:500;flex:1;min-width:0}
+.row .name small{display:block;color:var(--muted);font-family:var(--mono);font-size:12px;margin-top:2px}
+.qty{font-variant-numeric:tabular-nums;font-weight:600;font-size:15px;padding:3px 10px;border-radius:999px;white-space:nowrap}
+.qty.ok{background:var(--ok-bg);color:var(--ok)}
+.qty.low{background:var(--warn-bg);color:var(--warn)}
+.qty.zero{background:var(--none-bg);color:var(--none)}
+.qty.prod{background:var(--prod-bg);color:var(--prod)}
+
+.detail .back{border:0;background:transparent;color:var(--muted);padding:4px 0;margin-bottom:8px;display:flex;align-items:center;gap:4px;font-size:14px}
+.title{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:4px}
+.title h1{font-size:20px;font-weight:600;margin:0;line-height:1.25;text-wrap:balance}
+.title .code{font-family:var(--mono);color:var(--muted);font-size:13px;margin-top:2px}
+.mrp{font-variant-numeric:tabular-nums;color:var(--muted);white-space:nowrap;padding-top:3px}
+.scanned{margin:10px 0 4px;font-size:13px;color:var(--muted)}
+.scanned b{font-family:var(--mono);color:var(--fg);font-weight:500}
+
+.matrix{margin:12px 0 16px;overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+table{border-collapse:collapse;width:100%;min-width:100%}
+th,td{padding:8px 10px;text-align:center;font-variant-numeric:tabular-nums;border-bottom:1px solid var(--line);font-size:14px;white-space:nowrap}
+th{font-weight:500;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+th:first-child,td:first-child{text-align:left;position:sticky;left:0;background:var(--card);font-weight:500}
+tr:last-child td{border-bottom:0}
+td.sel{outline:2px solid var(--accent);outline-offset:-2px;border-radius:6px;font-weight:600}
+td.z{color:var(--none)}
+td .p{color:var(--prod);font-size:11px;display:block;line-height:1}
+.legend{font-size:12px;color:var(--muted);margin:-10px 0 14px}
+.legend i{font-style:normal;color:var(--prod)}
+
+.vsel{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px}
+.chip{border:1px solid var(--line);background:var(--card);border-radius:999px;padding:5px 12px;font-size:13px}
+.chip.on{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+
+.bucket{margin-bottom:14px}
+.bucket h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600;margin:0 0 6px;display:flex;justify-content:space-between}
+.bucket h2 span{font-variant-numeric:tabular-nums}
+.loc{display:flex;justify-content:space-between;align-items:center;padding:9px 14px;background:var(--card);border:1px solid var(--line);border-top:0}
+.loc:first-of-type{border-top:1px solid var(--line);border-radius:12px 12px 0 0}
+.loc:last-of-type{border-radius:0 0 12px 12px}
+.loc:first-of-type:last-of-type{border-radius:12px}
+.loc.mine{background:var(--ok-bg)}
+.loc .n{font-weight:500}
+.loc .n small{color:var(--muted);font-weight:400;margin-left:6px;font-size:12px}
+.loc .q{font-variant-numeric:tabular-nums;font-weight:600}
+.empty{color:var(--muted);font-size:13px;padding:10px 14px;background:var(--card);border:1px solid var(--line);border-radius:12px}
+.total{display:flex;gap:8px;margin:0 0 14px}
+.tile{flex:1;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.tile b{display:block;font-size:22px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.1}
+.tile span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.tile.prod b{color:var(--prod)}
+
+/* scanner */
+.sheet{position:fixed;inset:0;background:#000;z-index:20;display:none;flex-direction:column}
+.sheet.open{display:flex}
+.sheet video{flex:1;width:100%;object-fit:cover;background:#000}
+.sheet .bar{position:absolute;left:0;right:0;top:0;padding:calc(12px + env(safe-area-inset-top,0px)) 16px 12px;display:flex;justify-content:space-between;align-items:center;color:#fff;background:linear-gradient(rgba(0,0,0,.6),transparent)}
+.sheet .bar button{border:0;background:rgba(255,255,255,.18);color:#fff;border-radius:999px;padding:8px 14px;font-weight:600}
+.reticle{position:absolute;left:10%;right:10%;top:38%;height:22%;border:2px solid rgba(255,255,255,.85);border-radius:12px;box-shadow:0 0 0 2000px rgba(0,0,0,.35);pointer-events:none}
+.reticle::after{content:"";position:absolute;left:8%;right:8%;top:50%;height:2px;background:rgba(255,80,80,.9)}
+.sheet .msg{position:absolute;left:16px;right:16px;bottom:calc(24px + env(safe-area-inset-bottom,0px));color:#fff;text-align:center;font-size:14px;text-shadow:0 1px 3px #000}
+.manual{position:absolute;left:16px;right:16px;bottom:calc(64px + env(safe-area-inset-bottom,0px));display:flex;gap:8px}
+.manual input{flex:1;border:0;border-radius:10px;padding:10px 12px;font-family:var(--mono);text-transform:uppercase;font-size:16px}
+.manual button{border:0;border-radius:10px;padding:0 14px;background:#fff;font-weight:600}
+
+/* store picker */
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:15;display:none;align-items:flex-end;justify-content:center}
+.modal.open{display:flex}
+.panel{background:var(--bg);width:100%;max-width:640px;max-height:80%;border-radius:16px 16px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom,0px));overflow:auto}
+.panel h3{margin:0 0 10px;font-size:16px}
+.panel p{margin:0 0 12px;color:var(--muted);font-size:13px}
+.stores{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.stores button{border:1px solid var(--line);background:var(--card);border-radius:10px;padding:10px;text-align:left;font-size:14px}
+.stores button.on{border-color:var(--accent);background:var(--accent);color:var(--accent-fg)}
+.stores button small{display:block;color:inherit;opacity:.7;font-size:11px}
+.err{background:var(--warn-bg);color:var(--warn);border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:10px}
+.spin{color:var(--muted);text-align:center;padding:24px}
+@media (prefers-reduced-motion:no-preference){ .row,.chip{transition:transform .08s} .row:active,.chip:active{transform:scale(.985)} }
+</style>
+</head>
+<body>
+<div class="app">
+<header>
+  <div class="top">
+    <div class="brand">Mulmul · Stock</div>
+    <button class="store-btn" id="storeBtn" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l1-5h16l1 5M4 9v11h16V9M9 20v-6h6v6"/></svg><span id="storeName">Choose your store</span></button>
+  </div>
+  <div class="searchrow">
+    <div class="search" id="searchBox">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--muted)"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <input id="q" type="search" autocomplete="off" autocapitalize="characters" placeholder="Style code, SKU or product name" enterkeyhint="search">
+      <button class="clear" id="clear" type="button" aria-label="Clear">✕</button>
+    </div>
+    <button class="scan-btn" id="scanBtn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7V4h3M21 7V4h-3M3 17v3h3M21 17v3h-3M7 8v8M10 8v8M13 8v8M17 8v8"/></svg>Scan</button>
+  </div>
+  <div class="fresh" id="fresh"><span class="dot"></span><span id="freshTxt">Checking stock freshness…</span></div>
+</header>
+
+<main id="main">
+  <div class="hint"><b>Find any article in seconds</b>Type a style code like <code>SW2523</code>, a full SKU like <code>SW2523YS</code>, or a product name. Or tap <strong>Scan</strong> and point the camera at the barcode on the tag.</div>
+</main>
+</div>
+
+<div class="sheet" id="sheet">
+  <video id="video" playsinline muted></video>
+  <div class="reticle"></div>
+  <div class="bar"><span>Point at the tag barcode</span><button id="closeScan" type="button">Close</button></div>
+  <div class="manual"><input id="manualSku" placeholder="or type SKU" aria-label="Type SKU"><button id="manualGo" type="button">Go</button></div>
+  <div class="msg" id="scanMsg"></div>
+</div>
+
+<div class="modal" id="storeModal">
+  <div class="panel">
+    <h3>Which store are you in?</h3>
+    <p>Your store is highlighted first in every result. Saved on this phone.</p>
+    <div class="stores" id="storeList"></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
+<script>
+const SUPABASE_URL = "https://idhtjxirqvaensqhozdc.supabase.co";
+const SUPABASE_KEY = "sb_publishable_AQumcF8aqgNNdrOtSCp4Ig_fBJWSnEK";
+const SIZE_ORDER = ["XXS","XS","S","M","L","XL","XXL","2XL","3XL","4XL","FS","FREE"];
+const $ = s => document.querySelector(s);
+const main = $("#main"), q = $("#q");
+let locations = [], myStore = null, lastSearch = "", sampleMode = false;
+try { myStore = localStorage.getItem("mulmul.store") || null; } catch {}
+
+async function api(path, opts = {}) {
+  const r = await fetch(SUPABASE_URL + "/rest/v1/" + path, {
+    ...opts,
+    headers: { apikey: SUPABASE_KEY, Authorization: "Bearer " + SUPABASE_KEY, "Content-Type": "application/json", ...(opts.headers||{}) }
+  });
+  if (!r.ok) throw new Error("API " + r.status + ": " + await r.text());
+  return r.json();
+}
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const inr = n => n == null ? "" : "₹" + Number(n).toLocaleString("en-IN");
+const sizeIdx = s => { const i = SIZE_ORDER.indexOf(String(s||"").toUpperCase()); return i < 0 ? 99 : i; };
+
+/* ---------- boot ---------- */
+async function boot() {
+  try {
+    locations = await api("locations?is_active=eq.true&order=sort_order,display_name");
+  } catch (e) { main.innerHTML = `<div class="err">Can't reach the stock database. Check internet and reload.<br><small>${esc(e.message)}</small></div>`; return; }
+  renderStoreBtn();
+  buildStoreList();
+  if (!myStore) openStoreModal();
+  freshness();
+  const h = decodeURIComponent(location.hash.slice(1));
+  if (h) lookupSku(h);
+}
+async function freshness() {
+  const el = $("#fresh"), t = $("#freshTxt");
+  try {
+    const runs = await api("sync_runs?status=eq.ok&order=finished_at.desc&limit=1&select=finished_at");
+    if (!runs.length) { sampleMode = true; el.className = "fresh sample"; t.textContent = "Sample data — Vinculum sync not connected yet"; return; }
+    const mins = Math.round((Date.now() - new Date(runs[0].finished_at)) / 60000);
+    el.className = "fresh" + (mins > 90 ? " stale" : "");
+    t.textContent = mins < 2 ? "Stock updated just now" : mins < 60 ? `Stock updated ${mins} min ago` : `Stock updated ${Math.round(mins/60)} h ago`;
+  } catch { el.className = "fresh stale"; t.textContent = "Freshness unknown"; }
+}
+
+/* ---------- store picker ---------- */
+function renderStoreBtn() {
+  const l = locations.find(x => x.code === myStore);
+  $("#storeName").textContent = l ? l.display_name : "Choose your store";
+}
+function buildStoreList() {
+  $("#storeList").innerHTML = locations.filter(l => l.type === "Store").map(l =>
+    `<button type="button" data-code="${l.code}" class="${l.code===myStore?"on":""}">${esc(l.display_name)}<small>${esc(l.city||"")} · ${l.code}</small></button>`).join("");
+}
+function openStoreModal(){ $("#storeModal").classList.add("open"); }
+$("#storeBtn").onclick = openStoreModal;
+$("#storeModal").onclick = e => { if (e.target.id === "storeModal") $("#storeModal").classList.remove("open"); };
+$("#storeList").onclick = e => {
+  const b = e.target.closest("button"); if (!b) return;
+  myStore = b.dataset.code;
+  try { localStorage.setItem("mulmul.store", myStore); } catch {}
+  renderStoreBtn(); buildStoreList(); $("#storeModal").classList.remove("open");
+  if (currentStyle) showStyle(currentStyle.style_code, currentStyle.sku);
+};
+
+/* ---------- search ---------- */
+let timer;
+q.addEventListener("input", () => {
+  $("#searchBox").classList.toggle("has", q.value.length > 0);
+  clearTimeout(timer);
+  const v = q.value.trim();
+  if (!v) { if (!currentStyle) home(); return; }
+  timer = setTimeout(() => search(v), 220);
+});
+q.addEventListener("keydown", e => { if (e.key === "Enter") { clearTimeout(timer); const v = q.value.trim(); if (v) search(v, true); q.blur(); } });
+$("#clear").onclick = () => { q.value = ""; $("#searchBox").classList.remove("has"); home(); q.focus(); };
+function home(){ currentStyle = null; location.hash = ""; main.innerHTML = `<div class="hint"><b>Find any article in seconds</b>Type a style code like <code>SW2523</code>, a full SKU like <code>SW2523YS</code>, or a product name. Or tap <strong>Scan</strong> and point the camera at the barcode on the tag.</div>`; }
+
+async function search(v, direct) {
+  lastSearch = v; currentStyle = null;
+  main.innerHTML = `<div class="spin">Searching…</div>`;
+  try {
+    const rows = await api("rpc/search_styles", { method: "POST", body: JSON.stringify({ q: v, lim: 25 }) });
+    if (lastSearch !== v) return;
+    if (!rows.length) { main.innerHTML = `<div class="hint"><b>No match for “${esc(v)}”</b>Check the style code on the tag, or try part of the product name.</div>`; return; }
+    if (direct && rows.length === 1) return showStyle(rows[0].style_code, /^[A-Z0-9]{8,}$/i.test(v) ? v.toUpperCase() : null);
+    main.innerHTML = `<div class="results">` + rows.map(r => {
+      const c = r.total_qty > 5 ? "ok" : r.total_qty > 0 ? "low" : "zero";
+      return `<button type="button" class="row" data-style="${esc(r.style_code)}"><div class="name">${esc(r.product_name||"—")}<small>${esc(r.style_code)} · ${r.variants} variant${r.variants==1?"":"s"}</small></div><span class="qty ${c}">${r.total_qty} pcs</span></button>`;
+    }).join("") + `</div>`;
+  } catch (e) { main.innerHTML = `<div class="err">Search failed. ${esc(e.message)}</div>`; }
+}
+main.addEventListener("click", e => {
+  const r = e.target.closest(".row[data-style]"); if (r) return showStyle(r.dataset.style, null);
+  if (e.target.closest(".back")) { if (lastSearch) search(lastSearch); else home(); }
+  const ch = e.target.closest(".chip[data-sku]"); if (ch && currentStyle) showStyle(currentStyle.style_code, ch.dataset.sku === "ALL" ? null : ch.dataset.sku);
+  const td = e.target.closest("td[data-sku]"); if (td && currentStyle) showStyle(currentStyle.style_code, td.dataset.sku);
+});
+
+/* ---------- SKU lookup (from scan) ---------- */
+async function lookupSku(sku) {
+  sku = sku.trim().toUpperCase();
+  main.innerHTML = `<div class="spin">Looking up ${esc(sku)}…</div>`;
+  try {
+    const p = await api(`products?sku=eq.${encodeURIComponent(sku)}&select=style_code&limit=1`);
+    if (p.length) return showStyle(p[0].style_code, sku);
+    // fall back: treat as prefix / style code
+    q.value = sku; $("#searchBox").classList.add("has");
+    return search(sku, true);
+  } catch (e) { main.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+}
+
+/* ---------- style detail ---------- */
+let currentStyle = null;
+async function showStyle(style, sku) {
+  currentStyle = { style_code: style, sku };
+  location.hash = sku || style;
+  main.innerHTML = `<div class="spin">Loading ${esc(style)}…</div>`;
+  let prods, stock;
+  try {
+    [prods, stock] = await Promise.all([
+      api(`products?style_code=eq.${encodeURIComponent(style)}&select=sku,product_name,colour,size,mrp`),
+      api(`v_stock?style_code=eq.${encodeURIComponent(style)}&select=sku,colour,size,location_code,location_name,location_type,bin,qty,bucket`)
+    ]);
+  } catch (e) { main.innerHTML = `<div class="err">${esc(e.message)}</div>`; return; }
+  if (!prods.length) { main.innerHTML = `<div class="hint"><b>${esc(style)} not found</b>This style isn't in the product master yet.</div>`; return; }
+  const name = prods[0].product_name || style, mrp = prods[0].mrp;
+  const colours = [...new Set(prods.map(p => p.colour || "—"))];
+  const sizes = [...new Set(prods.map(p => p.size || "—"))].sort((a,b) => sizeIdx(a)-sizeIdx(b));
+  const bySku = {};
+  for (const p of prods) bySku[p.sku] = { ...p, avail: 0, prod: 0 };
+  for (const s of stock) { const r = bySku[s.sku] || (bySku[s.sku] = { sku: s.sku, colour: s.colour, size: s.size, avail: 0, prod: 0 }); if (s.bucket === "production") r.prod += s.qty; else r.avail += s.qty; }
+
+  // matrix colour × size
+  let matrix = `<div class="matrix"><table><thead><tr><th>Colour</th>${sizes.map(s=>`<th>${esc(s)}</th>`).join("")}</tr></thead><tbody>`;
+  for (const c of colours) {
+    matrix += `<tr><td>${esc(c)}</td>` + sizes.map(sz => {
+      const r = Object.values(bySku).find(x => (x.colour||"—")===c && (x.size||"—")===sz);
+      if (!r) return `<td class="z">·</td>`;
+      const sel = r.sku === sku ? " sel" : "";
+      return `<td class="${r.avail?"":"z"}${sel}" data-sku="${esc(r.sku)}">${r.avail}${r.prod?`<span class="p">+${r.prod}</span>`:""}</td>`;
+    }).join("") + `</tr>`;
+  }
+  matrix += `</tbody></table></div><div class="legend">Available pieces across all locations. <i>+n</i> = in production.</div>`;
+
+  // selected variant (or whole style) location breakdown
+  const rows = sku ? stock.filter(s => s.sku === sku) : stock;
+  const agg = {};
+  for (const s of rows) { const k = s.location_code; agg[k] = agg[k] || { ...s, qty: 0, bins: {} }; agg[k].qty += s.qty; agg[k].bins[s.bucket] = (agg[k].bins[s.bucket]||0) + s.qty; }
+  const prodQty = rows.filter(s=>s.bucket==="production").reduce((a,s)=>a+s.qty,0);
+  const whRows = Object.values(agg).filter(a => a.location_type==="WH" && (a.bins.warehouse||0) > 0).map(a => ({...a, qty: a.bins.warehouse}));
+  const stRows = Object.values(agg).filter(a => a.location_type==="Store").sort((a,b)=> (a.location_code===myStore?-1:b.location_code===myStore?1:0) || b.qty-a.qty);
+  const mine = stRows.find(a => a.location_code===myStore);
+  const availTotal = whRows.reduce((a,r)=>a+r.qty,0) + stRows.reduce((a,r)=>a+r.qty,0);
+  const sel = sku ? bySku[sku] : null;
+
+  const loc = a => `<div class="loc ${a.location_code===myStore?"mine":""}"><span class="n">${esc(a.location_name)}${a.location_code===myStore?"<small>your store</small>":""}</span><span class="q">${a.qty}</span></div>`;
+  const bucket = (title, list, emptyMsg) => `<div class="bucket"><h2>${title}<span>${list.reduce((a,r)=>a+r.qty,0)}</span></h2>${list.length ? list.map(loc).join("") : `<div class="empty">${emptyMsg}</div>`}</div>`;
+
+  main.innerHTML = `<div class="detail">
+    <button type="button" class="back">‹ ${lastSearch ? "Results" : "Search"}</button>
+    <div class="title"><div><h1>${esc(name)}</h1><div class="code">${esc(style)}${sel ? " · " + esc(sel.colour||"") + " · " + esc(sel.size||"") : ""}</div></div><div class="mrp">${inr(mrp)}</div></div>
+    ${sku ? `<div class="scanned">Showing <b>${esc(sku)}</b></div>` : ""}
+    ${matrix}
+    <div class="vsel"><button type="button" class="chip ${sku?"":"on"}" data-sku="ALL">Whole style</button>${Object.values(bySku).sort((a,b)=>(a.colour||"").localeCompare(b.colour||"")||sizeIdx(a.size)-sizeIdx(b.size)).map(v=>`<button type="button" class="chip ${v.sku===sku?"on":""}" data-sku="${esc(v.sku)}">${esc(v.colour||"")} ${esc(v.size||"")}</button>`).join("")}</div>
+    <div class="total">
+      <div class="tile"><b>${mine ? mine.qty : 0}</b><span>${myStore ? "Your store" : "Pick store"}</span></div>
+      <div class="tile"><b>${availTotal}</b><span>Available total</span></div>
+      <div class="tile prod"><b>${prodQty}</b><span>In production</span></div>
+    </div>
+    ${bucket("Warehouse", whRows, "None in warehouse")}
+    ${bucket("Stores", stRows, "Not in any store")}
+    ${bucket("In production", prodQty ? [{location_name:"Chhatarpur (virtual)", location_code:"MWH", qty:prodQty}] : [], "Nothing in production")}
+  </div>`;
+  window.scrollTo(0,0);
+}
+
+/* ---------- scanner ---------- */
+const sheet = $("#sheet"), video = $("#video"), scanMsg = $("#scanMsg");
+let stream = null, zxReader = null, rafStop = false;
+const SKU_RE = /^[A-Z]{1,4}\d{3,5}[A-Z0-9]{1,6}$/;   // SW2523YS-style codes
+$("#scanBtn").onclick = openScanner;
+$("#closeScan").onclick = closeScanner;
+$("#manualGo").onclick = () => { const v = $("#manualSku").value.trim(); if (v) { closeScanner(); lookupSku(v); } };
+$("#manualSku").addEventListener("keydown", e => { if (e.key==="Enter") $("#manualGo").click(); });
+
+async function openScanner() {
+  sheet.classList.add("open"); scanMsg.textContent = ""; rafStop = false;
+  if (!navigator.mediaDevices?.getUserMedia) { scanMsg.textContent = "Camera not available in this browser — type the SKU below."; return; }
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+    video.srcObject = stream; await video.play();
+  } catch (e) { scanMsg.textContent = "Camera permission denied — allow camera for this site, or type the SKU below."; return; }
+  if ("BarcodeDetector" in window) {
+    try {
+      const det = new BarcodeDetector({ formats: ["code_128","code_39","ean_13","ean_8","upc_a","qr_code","itf"] });
+      const tick = async () => {
+        if (rafStop) return;
+        try { const codes = await det.detect(video); if (codes.length) return onCode(codes[0].rawValue); } catch {}
+        setTimeout(tick, 120);
+      };
+      tick(); return;
+    } catch {}
+  }
+  // Fallback: ZXing
+  try {
+    const hints = new Map(); hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [ZXing.BarcodeFormat.CODE_128, ZXing.BarcodeFormat.CODE_39, ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.QR_CODE, ZXing.BarcodeFormat.ITF]);
+    zxReader = new ZXing.BrowserMultiFormatReader(hints, 300);
+    zxReader.decodeFromStream(stream, video, (res) => { if (res && !rafStop) onCode(res.getText()); });
+  } catch (e) { scanMsg.textContent = "Scanner failed to start — type the SKU below."; }
+}
+function onCode(raw) {
+  const v = String(raw).trim().toUpperCase();
+  if (!v) return;
+  if (navigator.vibrate) navigator.vibrate(40);
+  closeScanner();
+  q.value = v; $("#searchBox").classList.add("has");
+  lookupSku(v);
+}
+function closeScanner() {
+  rafStop = true; sheet.classList.remove("open");
+  try { zxReader?.reset(); } catch {} zxReader = null;
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  video.srcObject = null;
+}
+
+window.addEventListener("hashchange", () => { const h = decodeURIComponent(location.hash.slice(1)); if (h && !(currentStyle && (currentStyle.sku===h || (!currentStyle.sku && currentStyle.style_code===h)))) lookupSku(h); });
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(()=>{});
+boot();
+</script>
+</body>
+</html>

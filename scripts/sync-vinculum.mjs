@@ -23,7 +23,10 @@ async function vin(path, body, attempt = 1) {
   const wait = lastCall + MIN_GAP_MS - Date.now();
   if (wait > 0) await sleep(wait);
   lastCall = Date.now();
-  const r = await fetch(`${VIN_BASE}/${path}`, {
+  let r;
+  try {
+    r = await fetch(`${VIN_BASE}/${path}`, {
+    signal: AbortSignal.timeout(90000),
     method: "POST",
     headers: {
       ApiOwner: VINCULUM_API_OWNER,
@@ -33,7 +36,11 @@ async function vin(path, body, attempt = 1) {
       Accept: "application/json",
     },
     body: json,
-  });
+    });
+  } catch (e) {
+    if (attempt < 4) { log(`vinculum ${path} attempt ${attempt}: ${e.name} ${e.message}; retrying`); await sleep(5000 * attempt); return vin(path, body, attempt + 1); }
+    throw new Error(`Vinculum ${path} unreachable: ${e.name} ${e.message}`);
+  }
   const text = await r.text();
   let data;
   try { data = JSON.parse(text); } catch { data = null; }
@@ -165,6 +172,7 @@ const runStart = new Date().toISOString();
 const [run] = await sb("sync_runs", { method: "POST", body: { started_at: runStart, status: "running" }, prefer: "return=representation" });
 let lastProgress = 0;
 globalThis.onPage = msg => progress(msg);
+await progress("started; calling Vinculum", true);
 async function progress(msg, force) {
   log(msg);
   if (!force && Date.now() - lastProgress < 20000) return;

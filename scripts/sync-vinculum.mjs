@@ -74,8 +74,9 @@ async function fetchWhWindow(from, to, locSeen, buckets) {
       const qty = Math.max(0, Math.round(Number(r.qty || 0) - Number(r.committedQty || 0)));
       rows.push({ sku: String(r.skuCode).trim().toUpperCase(), location_code: r.location, bin: "", qty });
     }
+    if (globalThis.onPage) await globalThis.onPage(`${fmt(from).slice(0,10)}→${fmt(to).slice(0,10)} page ${page}: ${list.length} rows, hasMore=${data.hasMore}, good so far ${rows.length}`);
     if (!data.hasMore || list.length === 0) break;
-    if (page > 2000) throw new Error("pagination runaway");
+    if (page > 20000) throw new Error("pagination runaway");
   }
   return rows;
 }
@@ -163,6 +164,7 @@ async function upsert(table, rows, onConflict) {
 const runStart = new Date().toISOString();
 const [run] = await sb("sync_runs", { method: "POST", body: { started_at: runStart, status: "running" }, prefer: "return=representation" });
 let lastProgress = 0;
+globalThis.onPage = msg => progress(msg);
 async function progress(msg, force) {
   log(msg);
   if (!force && Date.now() - lastProgress < 20000) return;

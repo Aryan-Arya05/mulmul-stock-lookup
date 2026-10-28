@@ -12,7 +12,9 @@ async function report(status, msg) {
 }
 const missing = ["SHOPIFY_STORE", "SHOPIFY_ACCESS_TOKEN", "JINA_API_KEY", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"].filter(k => !process.env[k]);
 if (missing.length) { await report("index-error", `missing env ${missing.join(",")}`); console.error("Missing env", missing); process.exit(1); }
-process.on("unhandledRejection", async e => { await report("index-error", String(e?.message || e)); console.error(e); process.exit(1); });
+await report("index-start", "env ok");
+try { await main(); } catch (e) { await report("index-error", String(e?.stack || e).slice(0, 1500)); console.error(e); process.exit(1); }
+async function main() {
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function sb(path, { method = "GET", body, prefer } = {}) {
@@ -104,3 +106,4 @@ for (let i = 0; i < list.length; i += 16) {
 }
 await report("index-ok", `indexed ${list.length} new styles (shopify products seen ${seen})`);
 log("done");
+}

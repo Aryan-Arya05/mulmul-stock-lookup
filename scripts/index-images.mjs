@@ -79,7 +79,8 @@ while (seen < max) {
     if (!style && skus[0]) { const m = /^([A-Z]+\d+)/.exec(skus[0]); style = m ? m[1] : null; }
     if (!style || already.has(style) || todo.has(style)) continue;
     const base = url.split("?")[0];
-    todo.set(style, { style_code: style, shopify_product_id: node.id, title: node.title, image_url: url, thumb_url: `${base.replace(/(\.[a-z]+)$/i, "_400x$1")}` });
+    const sized = n => base.replace(/(\.[a-z]+)$/i, `_${n}x$1`);
+    todo.set(style, { style_code: style, shopify_product_id: node.id, title: node.title, image_url: url, thumb_url: sized(400), embed_url: sized(800) });
   }
   if (!d.products.pageInfo.hasNextPage) break;
   after = d.products.pageInfo.endCursor;
@@ -87,23 +88,24 @@ while (seen < max) {
 log(`shopify products seen ${seen}; styles to index ${todo.size}`);
 
 // 3. embed in batches and upsert
-const list = [...todo.values()];
+const list = [...todo.values()]; let reportedBatchErr = false, failed = 0; const t0 = Date.now();
 for (let i = 0; i < list.length; i += 16) {
   const batch = list.slice(i, i + 16);
   try {
-    const vecs = await jinaEmbed(batch.map(b => ({ image: b.image_url })));
+    const vecs = await jinaEmbed(batch.map(b => ({ image: b.embed_url })));
     await sb("product_images?on_conflict=style_code", { method: "POST", prefer: "resolution=merge-duplicates,return=minimal",
-      body: batch.map((b, j) => ({ ...b, embedding: JSON.stringify(vecs[j]), indexed_at: new Date().toISOString() })) });
+      body: batch.map(({ embed_url, ...b }, j) => ({ ...b, embedding: JSON.stringify(vecs[j]), indexed_at: new Date().toISOString() })) });
   } catch (e) {
     log(`batch ${i} failed: ${e.message}; falling back to singles`);
-    for (const b of batch) {
-      try { const [v] = await jinaEmbed([{ image: b.image_url }]); await sb("product_images?on_conflict=style_code", { method: "POST", prefer: "resolution=merge-duplicates,return=minimal", body: [{ ...b, embedding: JSON.stringify(v) }] }); }
-      catch (e2) { log(`skip ${b.style_code}: ${e2.message}`); }
+    if (!reportedBatchErr) { reportedBatchErr = true; await report("index-warn", `batch failed: ${e.message}`); }
+    for (const { embed_url, ...b } of batch) {
+      try { const [v] = await jinaEmbed([{ image: embed_url }]); await sb("product_images?on_conflict=style_code", { method: "POST", prefer: "resolution=merge-duplicates,return=minimal", body: [{ ...b, embedding: JSON.stringify(v) }] }); }
+      catch (e2) { log(`skip ${b.style_code}: ${e2.message}`); failed++; }
     }
   }
   if ((i / 16) % 10 === 0) log(`indexed ${Math.min(i + 16, list.length)}/${list.length}`);
-  await sleep(300);
+  await sleep(100);
 }
-await report("index-ok", `indexed ${list.length} new styles (shopify products seen ${seen})`);
+await report("index-ok", `indexed ${list.length - failed} new styles, ${failed} failed, in ${Math.round((Date.now() - t0) / 60000)} min (shopify products seen ${seen})`);
 log("done");
 }

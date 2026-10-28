@@ -32,9 +32,9 @@ async function shopify(query, variables) {
       method: "POST", headers: { "X-Shopify-Access-Token": SHOPIFY_ACCESS_TOKEN, "Content-Type": "application/json" },
       body: JSON.stringify({ query, variables }),
     });
-    const j = await r.json();
-    if (j.errors?.some(e => e.extensions?.code === "THROTTLED") && attempt < 6) { await sleep(2000 * attempt); continue; }
-    if (j.errors) throw new Error("Shopify: " + JSON.stringify(j.errors).slice(0, 400));
+    const text = await r.text(); let j; try { j = JSON.parse(text); } catch { j = { errors: text }; }
+    if (Array.isArray(j.errors) && j.errors.some(e => e.extensions?.code === "THROTTLED") && attempt < 6) { await sleep(2000 * attempt); continue; }
+    if (j.errors || !r.ok) throw new Error(`Shopify HTTP ${r.status}: ${JSON.stringify(j.errors ?? text).slice(0, 400)}`);
     return j.data;
   }
 }

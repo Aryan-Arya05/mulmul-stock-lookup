@@ -1,0 +1,99 @@
+// Index Shopify product images for photo search.
+// Shopify products -> first image per product -> style_code (via variant SKU in `products`) -> Jina CLIP v2 embedding -> product_images
+// Env: SHOPIFY_STORE (e.g. shopmulmul.myshopify.com), SHOPIFY_ACCESS_TOKEN, JINA_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+// Optional: REINDEX_ALL=1 (re-embed everything), MAX_PRODUCTS=n
+
+const { SHOPIFY_STORE, SHOPIFY_ACCESS_TOKEN, JINA_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = process.env;
+for (const k of ["SHOPIFY_STORE", "SHOPIFY_ACCESS_TOKEN", "JINA_API_KEY", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"])
+  if (!process.env[k]) { console.error(`Missing env ${k}`); process.exit(1); }
+const log = (...a) => console.log(new Date().toISOString(), ...a);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+async function sb(path, { method = "GET", body, prefer } = {}) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    method,
+    headers: { apikey: SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json", ...(prefer ? { Prefer: prefer } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!r.ok) throw new Error(`Supabase ${method} ${path}: ${r.status} ${await r.text()}`);
+  const t = await r.text(); return t ? JSON.parse(t) : null;
+}
+async function shopify(query, variables) {
+  for (let attempt = 1; ; attempt++) {
+    const r = await fetch(`https://${SHOPIFY_STORE}/admin/api/2025-07/graphql.json`, {
+      method: "POST", headers: { "X-Shopify-Access-Token": SHOPIFY_ACCESS_TOKEN, "Content-Type": "application/json" },
+      body: JSON.stringify({ query, variables }),
+    });
+    const j = await r.json();
+    if (j.errors?.some(e => e.extensions?.code === "THROTTLED") && attempt < 6) { await sleep(2000 * attempt); continue; }
+    if (j.errors) throw new Error("Shopify: " + JSON.stringify(j.errors).slice(0, 400));
+    return j.data;
+  }
+}
+async function jinaEmbed(items) {   // items: [{image: url}] -> [vector]
+  for (let attempt = 1; ; attempt++) {
+    const r = await fetch("https://api.jina.ai/v1/embeddings", {
+      method: "POST", headers: { Authorization: `Bearer ${JINA_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "jina-clip-v2", dimensions: 1024, normalized: true, input: items }),
+    });
+    if ((r.status === 429 || r.status >= 500) && attempt < 6) { log(`jina ${r.status}, retry ${attempt}`); await sleep(3000 * attempt); continue; }
+    if (!r.ok) throw new Error(`Jina ${r.status}: ${(await r.text()).slice(0, 300)}`);
+    const j = await r.json();
+    return j.data.sort((a, b) => a.index - b.index).map(d => d.embedding);
+  }
+}
+
+// 1. product master: sku -> style_code
+log("loading sku→style map");
+const skuStyle = new Map();
+for (let off = 0; ; off += 10000) {
+  const rows = await sb(`products?select=sku,style_code&offset=${off}&limit=10000`);
+  rows.forEach(p => skuStyle.set(p.sku, p.style_code));
+  if (rows.length < 10000) break;
+}
+const already = new Set(process.env.REINDEX_ALL ? [] : (await sb("product_images?select=style_code,embedding&embedding=not.is.null&limit=100000")).map(r => r.style_code));
+log(`known skus ${skuStyle.size}; already indexed styles ${already.size}`);
+
+// 2. walk Shopify products
+const Q = `query($after:String){ products(first:100, after:$after, query:"status:active", sortKey:UPDATED_AT, reverse:true){
+  pageInfo{hasNextPage endCursor}
+  edges{ node{ id title featuredMedia{ preview{ image{ url } } } variants(first:5){ edges{ node{ sku } } } } } } }`;
+const todo = new Map(); let after = null, seen = 0;
+const max = Number(process.env.MAX_PRODUCTS || 100000);
+while (seen < max) {
+  const d = await shopify(Q, { after });
+  for (const { node } of d.products.edges) {
+    seen++;
+    const url = node.featuredMedia?.preview?.image?.url; if (!url) continue;
+    const skus = node.variants.edges.map(e => (e.node.sku || "").trim().toUpperCase()).filter(Boolean);
+    let style = null;
+    for (const s of skus) { if (skuStyle.has(s)) { style = skuStyle.get(s); break; } }
+    if (!style && skus[0]) { const m = /^([A-Z]+\d+)/.exec(skus[0]); style = m ? m[1] : null; }
+    if (!style || already.has(style) || todo.has(style)) continue;
+    const base = url.split("?")[0];
+    todo.set(style, { style_code: style, shopify_product_id: node.id, title: node.title, image_url: url, thumb_url: `${base.replace(/(\.[a-z]+)$/i, "_400x$1")}` });
+  }
+  if (!d.products.pageInfo.hasNextPage) break;
+  after = d.products.pageInfo.endCursor;
+}
+log(`shopify products seen ${seen}; styles to index ${todo.size}`);
+
+// 3. embed in batches and upsert
+const list = [...todo.values()];
+for (let i = 0; i < list.length; i += 16) {
+  const batch = list.slice(i, i + 16);
+  try {
+    const vecs = await jinaEmbed(batch.map(b => ({ image: b.image_url })));
+    await sb("product_images?on_conflict=style_code", { method: "POST", prefer: "resolution=merge-duplicates,return=minimal",
+      body: batch.map((b, j) => ({ ...b, embedding: JSON.stringify(vecs[j]), indexed_at: new Date().toISOString() })) });
+  } catch (e) {
+    log(`batch ${i} failed: ${e.message}; falling back to singles`);
+    for (const b of batch) {
+      try { const [v] = await jinaEmbed([{ image: b.image_url }]); await sb("product_images?on_conflict=style_code", { method: "POST", prefer: "resolution=merge-duplicates,return=minimal", body: [{ ...b, embedding: JSON.stringify(v) }] }); }
+      catch (e2) { log(`skip ${b.style_code}: ${e2.message}`); }
+    }
+  }
+  if ((i / 16) % 10 === 0) log(`indexed ${Math.min(i + 16, list.length)}/${list.length}`);
+  await sleep(300);
+}
+log("done");

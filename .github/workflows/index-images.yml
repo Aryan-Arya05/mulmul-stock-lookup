@@ -1,0 +1,35 @@
+name: Index product images (photo search)
+on:
+  schedule:
+    - cron: "41 1 * * *"       # daily ~07:11 IST, picks up new Shopify products
+  workflow_dispatch:
+    inputs:
+      max_products: { description: "Limit products scanned (0 = all)", default: "0" }
+      reindex_all:  { description: "Re-embed everything", type: boolean, default: false }
+jobs:
+  index:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: node scripts/index-images.mjs
+        env:
+          SHOPIFY_STORE: shopmulmul.myshopify.com
+          SHOPIFY_ACCESS_TOKEN: ${{ secrets.SHOPIFY_ACCESS_TOKEN }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+          SUPABASE_URL: https://idhtjxirqvaensqhozdc.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          MAX_PRODUCTS: ${{ inputs.max_products != '0' && inputs.max_products || '' }}
+          REINDEX_ALL: ${{ inputs.reindex_all == true && '1' || '' }}
+      - name: Smoke-test photo-search with an indexed image
+        run: |
+          URL=$(curl -s "https://idhtjxirqvaensqhozdc.supabase.co/rest/v1/product_images?select=image_url,style_code&limit=1" -H "apikey: $ANON" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const r=JSON.parse(s)[0];console.log(r.image_url+" "+r.style_code)})')
+          IMG=$(echo "$URL" | cut -d' ' -f1); STYLE=$(echo "$URL" | cut -d' ' -f2)
+          B64=$(curl -sL "$IMG" | base64 -w0)
+          echo "{\"image\":\"$B64\",\"k\":3}" > /tmp/q.json
+          curl -s -X POST "https://idhtjxirqvaensqhozdc.supabase.co/functions/v1/photo-search" -H "apikey: $ANON" -H "Content-Type: application/json" --data @/tmp/q.json | head -c 600; echo
+          echo "expected top match: $STYLE"
+        env:
+          ANON: sb_publishable_AQumcF8aqgNNdrOtSCp4Ig_fBJWSnEK

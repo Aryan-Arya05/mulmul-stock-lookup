@@ -90,7 +90,7 @@ log(`shopify products seen ${seen}; styles to index ${todo.size}`);
 
 // 3. embed in batches and upsert
 const list = [...todo.values()]; let reportedBatchErr = false, failed = 0; const t0 = Date.now();
-const BATCH = Number(process.env.JINA_BATCH || 10), GAP_MS = Number(process.env.JINA_GAP_MS || 62000);
+const BATCH = Number(process.env.JINA_BATCH || 20), GAP_MS = Number(process.env.JINA_GAP_MS || 4000);   // paid Jina tier: 2M tokens/min
 let lastBatchAt = 0;
 for (let i = 0; i < list.length; i += BATCH) {
   const batch = list.slice(i, i + BATCH);

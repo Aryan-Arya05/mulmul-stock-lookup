@@ -311,7 +311,7 @@ $("#photoIn").addEventListener("change", async e => {
   currentStyle = null; lastSearch = "";
   main.innerHTML = `<div class="spin">Looking at the photo…</div>`;
   let b64, previewUrl;
-  try { ({ b64, previewUrl } = await shrinkImage(file, 768)); }
+  try { ({ b64, previewUrl } = await shrinkImage(file, 512)); }
   catch (err) { main.innerHTML = `<div class="err">Couldn't read that image. ${esc(err.message)}</div>`; return; }
   try {
     const r = await fetch(SUPABASE_URL + "/functions/v1/photo-search", { method: "POST", headers: { apikey: SUPABASE_KEY, "Content-Type": "application/json" }, body: JSON.stringify({ image: b64, k: 8 }) });

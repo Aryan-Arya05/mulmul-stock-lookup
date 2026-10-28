@@ -4,9 +4,15 @@
 // Optional: REINDEX_ALL=1 (re-embed everything), MAX_PRODUCTS=n
 
 const { SHOPIFY_STORE, SHOPIFY_ACCESS_TOKEN, JINA_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = process.env;
-for (const k of ["SHOPIFY_STORE", "SHOPIFY_ACCESS_TOKEN", "JINA_API_KEY", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"])
-  if (!process.env[k]) { console.error(`Missing env ${k}`); process.exit(1); }
 const log = (...a) => console.log(new Date().toISOString(), ...a);
+async function report(status, msg) {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) return;
+  await fetch(`${SUPABASE_URL}/rest/v1/sync_runs`, { method: "POST", headers: { apikey: SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ status, finished_at: new Date().toISOString(), progress: `image index: ${msg}`.slice(0, 2000) }) }).catch(() => {});
+}
+const missing = ["SHOPIFY_STORE", "SHOPIFY_ACCESS_TOKEN", "JINA_API_KEY", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"].filter(k => !process.env[k]);
+if (missing.length) { await report("index-error", `missing env ${missing.join(",")}`); console.error("Missing env", missing); process.exit(1); }
+process.on("unhandledRejection", async e => { await report("index-error", String(e?.message || e)); console.error(e); process.exit(1); });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function sb(path, { method = "GET", body, prefer } = {}) {
@@ -96,4 +102,5 @@ for (let i = 0; i < list.length; i += 16) {
   if ((i / 16) % 10 === 0) log(`indexed ${Math.min(i + 16, list.length)}/${list.length}`);
   await sleep(300);
 }
+await report("index-ok", `indexed ${list.length} new styles (shopify products seen ${seen})`);
 log("done");

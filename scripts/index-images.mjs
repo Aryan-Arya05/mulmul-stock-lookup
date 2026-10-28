@@ -60,8 +60,10 @@ for (let off = 0; ; off += 10000) {
   rows.forEach(p => skuStyle.set(p.sku, p.style_code));
   if (rows.length < 10000) break;
 }
-const already = new Set(process.env.REINDEX_ALL ? [] : (await sb("product_images?select=style_code,embedding&embedding=not.is.null&limit=100000")).map(r => r.style_code));
-log(`known skus ${skuStyle.size}; already indexed styles ${already.size}`);
+// existing index: product id -> image url (base, without ?v=) so a changed image is re-embedded
+const already = new Map();
+if (!process.env.REINDEX_ALL) for (const r of await sb("product_images?select=shopify_product_id,image_url&embedding=not.is.null&limit=100000")) already.set(r.shopify_product_id, (r.image_url || "").split("?")[0]);
+log(`known skus ${skuStyle.size}; already indexed products ${already.size}`);
 
 // 2. walk Shopify products
 const Q = `query($after:String){ products(first:100, after:$after, query:"status:active", sortKey:UPDATED_AT, reverse:true){
@@ -78,15 +80,16 @@ while (seen < max) {
     let style = null;
     for (const s of skus) { if (skuStyle.has(s)) { style = skuStyle.get(s); break; } }
     if (!style && skus[0]) { const m = /^([A-Z]+\d+)/.exec(skus[0]); style = m ? m[1] : null; }
-    if (!style || already.has(style) || todo.has(style)) continue;
+    if (!style) continue;
     const base = url.split("?")[0];
+    if (already.get(node.id) === base) continue;          // same image as last time
     const sized = n => base.replace(/(\.[a-z]+)$/i, `_${n}x$1`);
-    todo.set(style, { style_code: style, shopify_product_id: node.id, title: node.title, image_url: url, thumb_url: sized(400), embed_url: sized(512) });
+    todo.set(node.id, { style_code: style, shopify_product_id: node.id, title: node.title, image_url: url, thumb_url: sized(400), embed_url: sized(512) });
   }
   if (!d.products.pageInfo.hasNextPage) break;
   after = d.products.pageInfo.endCursor;
 }
-log(`shopify products seen ${seen}; styles to index ${todo.size}`);
+log(`shopify products seen ${seen}; products to (re)index ${todo.size}`);
 
 // 3. embed in batches and upsert
 const list = [...todo.values()]; let reportedBatchErr = false, failed = 0; const t0 = Date.now();
@@ -98,13 +101,13 @@ for (let i = 0; i < list.length; i += BATCH) {
   lastBatchAt = Date.now();
   try {
     const vecs = await jinaEmbed(batch.map(b => ({ image: b.embed_url })));
-    await sb("product_images?on_conflict=style_code", { method: "POST", prefer: "resolution=merge-duplicates,return=minimal",
+    await sb("product_images?on_conflict=shopify_product_id", { method: "POST", prefer: "resolution=merge-duplicates,return=minimal",
       body: batch.map(({ embed_url, ...b }, j) => ({ ...b, embedding: JSON.stringify(vecs[j]), indexed_at: new Date().toISOString() })) });
   } catch (e) {
     log(`batch ${i} failed: ${e.message}; falling back to singles`);
     if (!reportedBatchErr) { reportedBatchErr = true; await report("index-warn", `batch failed: ${e.message}`); }
     for (const { embed_url, ...b } of batch) {
-      try { const [v] = await jinaEmbed([{ image: embed_url }]); await sb("product_images?on_conflict=style_code", { method: "POST", prefer: "resolution=merge-duplicates,return=minimal", body: [{ ...b, embedding: JSON.stringify(v) }] }); }
+      try { const [v] = await jinaEmbed([{ image: embed_url }]); await sb("product_images?on_conflict=shopify_product_id", { method: "POST", prefer: "resolution=merge-duplicates,return=minimal", body: [{ ...b, embedding: JSON.stringify(v) }] }); }
       catch (e2) { log(`skip ${b.style_code}: ${e2.message}`); failed++; }
     }
   }

@@ -148,6 +148,11 @@ td .t{color:var(--transit);font-size:11px;display:block;line-height:1}
 .stores button{border:1px solid var(--line);background:var(--card);border-radius:10px;padding:10px;text-align:left;font-size:14px}
 .stores button.on{border-color:var(--accent);background:var(--accent);color:var(--accent-fg)}
 .stores button small{display:block;color:inherit;opacity:.7;font-size:11px}
+.panel .actions{display:flex;gap:8px;margin-top:12px;position:sticky;bottom:0;background:var(--bg);padding-top:8px}
+.panel .actions button{flex:1;border:1px solid var(--line);background:var(--card);border-radius:10px;padding:10px;font-weight:600}
+.panel .actions button.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.filt{display:flex;gap:6px;margin:0 0 12px}
+.filt .chip.on{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
 .err{background:var(--warn-bg);color:var(--warn);border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:10px}
 .spin{color:var(--muted);text-align:center;padding:24px}
 @media (prefers-reduced-motion:no-preference){ .row,.chip{transition:transform .08s} .row:active,.chip:active{transform:scale(.985)} }
@@ -200,9 +205,10 @@ td .t{color:var(--transit);font-size:11px;display:block;line-height:1}
 
 <div class="modal" id="storeModal">
   <div class="panel">
-    <h3>Which store are you in?</h3>
-    <p>Your store is highlighted first in every result. Saved on this phone.</p>
+    <h3>Your stores</h3>
+    <p>Pick one or more. They're highlighted first in every result and added up in the "Your stores" tile. Saved on this phone.</p>
     <div class="stores" id="storeList"></div>
+    <div class="actions"><button type="button" id="storeClear">Clear</button><button type="button" id="storeDone" class="primary">Done</button></div>
   </div>
 </div>
 
@@ -213,8 +219,9 @@ const SUPABASE_KEY = "sb_publishable_AQumcF8aqgNNdrOtSCp4Ig_fBJWSnEK";
 const SIZE_ORDER = ["XXS","XS","S","M","L","XL","XXL","2XL","3XL","4XL","FS","FREE"];
 const $ = s => document.querySelector(s);
 const main = $("#main"), q = $("#q");
-let locations = [], myStore = null, lastSearch = "", sampleMode = false;
-try { myStore = localStorage.getItem("mulmul.store") || null; } catch {}
+let locations = [], myStores = [], lastSearch = "", sampleMode = false, onlyMine = false;
+try { const v = localStorage.getItem("mulmul.stores") || localStorage.getItem("mulmul.store") || ""; myStores = v.split(",").filter(Boolean); } catch {}
+const isMine = code => myStores.includes(code);
 
 async function api(path, opts = {}) {
   const r = await fetch(SUPABASE_URL + "/rest/v1/" + path, {
@@ -235,7 +242,7 @@ async function boot() {
   } catch (e) { main.innerHTML = `<div class="err">Can't reach the stock database. Check internet and reload.<br><small>${esc(e.message)}</small></div>`; return; }
   renderStoreBtn();
   buildStoreList();
-  if (!myStore) openStoreModal();
+  if (!myStores.length) openStoreModal();
   freshness();
   const h = decodeURIComponent(location.hash.slice(1));
   if (h) lookupSku(h);
@@ -255,23 +262,29 @@ async function freshness() {
 
 /* ---------- store picker ---------- */
 function renderStoreBtn() {
-  const l = locations.find(x => x.code === myStore);
-  $("#storeName").textContent = l ? l.display_name : "Choose your store";
+  const names = myStores.map(c => (locations.find(x => x.code === c) || {}).display_name).filter(Boolean);
+  $("#storeName").textContent = !names.length ? "Choose your stores" : names.length === 1 ? names[0] : names.length === 2 ? names.join(" + ") : `${names[0]} +${names.length - 1}`;
 }
 function buildStoreList() {
   $("#storeList").innerHTML = locations.filter(l => l.type === "Store").map(l =>
-    `<button type="button" data-code="${l.code}" class="${l.code===myStore?"on":""}">${esc(l.display_name)}<small>${esc(l.city||"")} · ${l.code}</small></button>`).join("");
+    `<button type="button" data-code="${l.code}" class="${isMine(l.code)?"on":""}">${isMine(l.code)?"✓ ":""}${esc(l.display_name)}<small>${esc(l.city||"")} · ${l.code}</small></button>`).join("");
 }
 function openStoreModal(){ $("#storeModal").classList.add("open"); }
 $("#storeBtn").onclick = openStoreModal;
 $("#storeModal").onclick = e => { if (e.target.id === "storeModal") $("#storeModal").classList.remove("open"); };
 $("#storeList").onclick = e => {
   const b = e.target.closest("button"); if (!b) return;
-  myStore = b.dataset.code;
-  try { localStorage.setItem("mulmul.store", myStore); } catch {}
-  renderStoreBtn(); buildStoreList(); $("#storeModal").classList.remove("open");
-  if (currentStyle) showStyle(currentStyle.style_code, currentStyle.sku);
+  const c = b.dataset.code;
+  myStores = isMine(c) ? myStores.filter(x => x !== c) : [...myStores, c];
+  buildStoreList();
 };
+function saveStores() {
+  try { localStorage.setItem("mulmul.stores", myStores.join(",")); } catch {}
+  renderStoreBtn(); $("#storeModal").classList.remove("open");
+  if (currentStyle) showStyle(currentStyle.style_code, currentStyle.sku);
+}
+$("#storeDone").onclick = saveStores;
+$("#storeClear").onclick = () => { myStores = []; onlyMine = false; buildStoreList(); };
 
 /* ---------- search ---------- */
 let timer;
@@ -308,6 +321,7 @@ main.addEventListener("click", e => {
   if (e.target.closest(".back")) { if (lastSearch) search(lastSearch); else home(); }
   const ch = e.target.closest(".chip[data-sku]"); if (ch && currentStyle) showStyle(currentStyle.style_code, ch.dataset.sku === "ALL" ? null : ch.dataset.sku);
   const td = e.target.closest("td[data-sku]"); if (td && currentStyle) showStyle(currentStyle.style_code, td.dataset.sku);
+  const f = e.target.closest(".chip[data-filt]"); if (f && currentStyle) { onlyMine = f.dataset.filt === "mine"; showStyle(currentStyle.style_code, currentStyle.sku); }
 });
 
 async function thumbsFor(styles) {
@@ -411,13 +425,15 @@ async function showStyle(style, sku) {
   const prodQty = rows.filter(s=>s.bucket==="production").reduce((a,s)=>a+s.qty,0);
   const transitQty = rows.filter(s=>s.bucket==="transit").reduce((a,s)=>a+s.qty,0);
   const whRows = Object.values(agg).filter(a => a.location_type==="WH" && (a.bins.warehouse||0) > 0).map(a => ({...a, qty: a.bins.warehouse}));
-  const stRows = Object.values(agg).filter(a => a.location_type==="Store" && (a.bins.store||0) > 0).map(a => ({...a, qty: a.bins.store})).sort((a,b)=> (a.location_code===myStore?-1:b.location_code===myStore?1:0) || b.qty-a.qty);
-  const trRows = Object.values(agg).filter(a => (a.bins.transit||0) > 0).map(a => ({...a, qty: a.bins.transit})).sort((a,b)=> (a.location_code===myStore?-1:b.location_code===myStore?1:0) || b.qty-a.qty);
-  const mine = stRows.find(a => a.location_code===myStore);
-  const availTotal = whRows.reduce((a,r)=>a+r.qty,0) + stRows.reduce((a,r)=>a+r.qty,0);
+  const mineFirst = (a,b) => (isMine(b.location_code) - isMine(a.location_code)) || b.qty - a.qty;
+  const stAll = Object.values(agg).filter(a => a.location_type==="Store" && (a.bins.store||0) > 0).map(a => ({...a, qty: a.bins.store})).sort(mineFirst);
+  const stRows = onlyMine && myStores.length ? stAll.filter(a => isMine(a.location_code)) : stAll;
+  const trRows = Object.values(agg).filter(a => (a.bins.transit||0) > 0).map(a => ({...a, qty: a.bins.transit})).sort(mineFirst);
+  const mineQty = stAll.filter(a => isMine(a.location_code)).reduce((x,r)=>x+r.qty,0);
+  const availTotal = whRows.reduce((a,r)=>a+r.qty,0) + stAll.reduce((a,r)=>a+r.qty,0);
   const sel = sku ? bySku[sku] : null;
 
-  const loc = a => `<div class="loc ${a.location_code===myStore?"mine":""}"><span class="n">${esc(a.location_name)}${a.location_code===myStore?"<small>your store</small>":""}</span><span class="q">${a.qty}</span></div>`;
+  const loc = a => `<div class="loc ${isMine(a.location_code)?"mine":""}"><span class="n">${esc(a.location_name)}${isMine(a.location_code)?"<small>yours</small>":""}</span><span class="q">${a.qty}</span></div>`;
   const bucket = (title, list, emptyMsg) => `<div class="bucket"><h2>${title}<span>${list.reduce((a,r)=>a+r.qty,0)}</span></h2>${list.length ? list.map(loc).join("") : `<div class="empty">${emptyMsg}</div>`}</div>`;
 
   main.innerHTML = `<div class="detail">
@@ -428,13 +444,14 @@ async function showStyle(style, sku) {
     ${matrix}
     <div class="vsel"><button type="button" class="chip ${sku?"":"on"}" data-sku="ALL">Whole style</button>${Object.values(bySku).sort((a,b)=>(a.colour||"").localeCompare(b.colour||"")||sizeIdx(a.size)-sizeIdx(b.size)).map(v=>`<button type="button" class="chip ${v.sku===sku?"on":""}" data-sku="${esc(v.sku)}">${esc(v.colour||"")} ${esc(v.size||"")}</button>`).join("")}</div>
     <div class="total">
-      <div class="tile"><b>${mine ? mine.qty : 0}</b><span>${myStore ? "Your store" : "Pick store"}</span></div>
+      <div class="tile"><b>${mineQty}</b><span>${!myStores.length ? "Pick stores" : myStores.length === 1 ? "Your store" : `Your ${myStores.length} stores`}</span></div>
       <div class="tile"><b>${availTotal}</b><span>Available total</span></div>
       ${transitQty ? `<div class="tile transit"><b>${transitQty}</b><span>In transit</span></div>` : ""}
       <div class="tile prod"><b>${prodQty}</b><span>In production</span></div>
     </div>
     ${bucket("Warehouse", whRows, "None in warehouse")}
-    ${bucket("Stores", stRows, "Not in any store")}
+    ${myStores.length ? `<div class="filt"><button type="button" class="chip ${onlyMine?"":"on"}" data-filt="all">All stores</button><button type="button" class="chip ${onlyMine?"on":""}" data-filt="mine">Only my stores</button></div>` : ""}
+    ${bucket(onlyMine && myStores.length ? "Your stores" : "Stores", stRows, onlyMine ? "None of your stores has this" : "Not in any store")}
     ${transitQty ? bucket("In transit (dispatched from warehouse)", trRows, "") : ""}
     ${bucket("In production", prodQty ? [{location_name:"Chhatarpur (virtual)", location_code:"MWH", qty:prodQty}] : [], "Nothing in production")}
   </div>`;

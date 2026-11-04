@@ -1,8 +1,8 @@
-name: Probe Vinculum API
+name: Probe Vinculum lot-level API
 on:
   workflow_dispatch:
     inputs:
-      locs: { description: "Comma-separated location codes", default: "MKM,GGN,JUH,MCS,MNW" }
+      owner: { description: "ApiOwner override (blank = secret)", default: "" }
 jobs:
   probe:
     runs-on: ubuntu-latest
@@ -10,10 +10,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 20 }
-      - run: node scripts/probe.mjs
+      - run: node scripts/probe-lot.mjs
         env:
           VINCULUM_API_KEY: ${{ secrets.VINCULUM_API_KEY }}
           VINCULUM_API_OWNER: ${{ secrets.VINCULUM_API_OWNER }}
+          PROBE_OWNER: ${{ inputs.owner }}
           SUPABASE_URL: https://idhtjxirqvaensqhozdc.supabase.co
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          PROBE_LOCS: ${{ inputs.locs }}

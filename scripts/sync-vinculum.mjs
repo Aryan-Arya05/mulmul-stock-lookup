@@ -195,7 +195,7 @@ try {
   });
   const unknown = [...new Set(inv.filter(r => !knownLocs.has(r.location_code)).map(r => r.location_code))];
   if (unknown.length) log("WARNING: inventory rows for locations not in master, skipped:", unknown);
-  const invRows = inv.filter(r => knownLocs.has(r.location_code)).map(r => ({ ...r, synced_at: runStart }));
+  const invRows = inv.filter(r => knownLocs.has(r.location_code) && r.location_code !== "OPT").map(r => ({ ...r, synced_at: runStart }));
   log(`inventory rows to write: ${invRows.length}`);
 
   // product master: fetch SKUs we don't have (or all, on full refresh)

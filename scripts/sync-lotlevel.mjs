@@ -31,7 +31,7 @@ async function vin(body, attempt = 1) {
       body: new URLSearchParams({ ApiOwner: VINCULUM_API_OWNER, ApiKey: VINCULUM_API_KEY, RequestBody: JSON.stringify(body) }).toString() });
   } catch (e) { if (attempt < 4) { log(`network ${e.name}; retry ${attempt}`); await sleep(5000 * attempt); return vin(body, attempt + 1); } throw e; }
   const t = await r.text(); let d; try { d = JSON.parse(t); } catch { d = null; }
-  if (d && Number(d.responseCode) === 1105) return { response: [], hasMore: false };
+  if (d && [1105, 9].includes(Number(d.responseCode))) return { response: [], hasMore: false };   // "No Record Found"
   if (d && Number(d.responseCode) === 13) { if (attempt > 6) throw new Error("quota exceeded"); log("quota hit; waiting 65s"); await sleep(65000); return vin(body, attempt + 1); }
   if (!r.ok || !d || Number(d.responseCode) !== 0) {
     if (attempt < 4 && (r.status >= 500 || !d)) { await sleep(3000 * attempt); return vin(body, attempt + 1); }

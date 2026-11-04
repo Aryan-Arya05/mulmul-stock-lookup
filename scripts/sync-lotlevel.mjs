@@ -26,7 +26,7 @@ async function vin(body, attempt = 1) {
   const wait = lastCall + 700 - Date.now(); if (wait > 0) await sleep(wait); lastCall = Date.now();
   let r;
   try {
-    r = await fetch(`${VIN_BASE}/v1/sku/getlotlevelinventory`, { method: "POST", signal: AbortSignal.timeout(120000),
+    r = await fetch(`${VIN_BASE}/v1/sku/getlotlevelinventory`, { method: "POST", signal: AbortSignal.timeout(45000),
       headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
       body: new URLSearchParams({ ApiOwner: VINCULUM_API_OWNER, ApiKey: VINCULUM_API_KEY, RequestBody: JSON.stringify(body) }).toString() });
   } catch (e) { if (attempt < 4) { log(`network ${e.name}; retry ${attempt}`); await sleep(5000 * attempt); return vin(body, attempt + 1); } throw e; }
@@ -46,12 +46,16 @@ const progress = async m => { log(m); await sb(`sync_runs?id=eq.${run.id}`, { me
 try {
   const knownLocs = new Set((await sb("locations?select=code")).map(l => l.code));
   const days = Number(process.env.LOOKBACK_DAYS || 2);
-  const locs = (process.env.LOC_CODES || "").split(",").map(s => s.trim()).filter(Boolean);
+  const allLocs = await sb("locations?select=code,type&is_active=eq.true&order=sort_order,code");
+  const locs = (process.env.LOC_CODES || "").split(",").map(s => s.trim()).filter(Boolean).length
+    ? process.env.LOC_CODES.split(",").map(s => s.trim()).filter(Boolean)
+    : allLocs.filter(l => l.type === "Store").map(l => l.code);   // stores only; warehouses come from the WH sync
   const now = new Date(), from = new Date(now - days * 86400e3);
   const agg = new Map();   // sku|loc|bin -> qty
   const pairs = new Set(); // sku|loc seen
-  const binsSeen = {}; let pages = 0, rawRows = 0;
-  for (const loc of (locs.length ? locs : [""])) {
+  const binsSeen = {}; let pages = 0, rawRows = 0, locsDone = 0; const failed = [];
+  for (const loc of locs) {
+    try {
     for (let page = 1; ; page++) {
       const d = await vin({ skuCodes: [], buckets: ["good"], fromDate: fmt(from), toDate: fmt(now), pageNumber: String(page), locCode: loc, extLocCode: loc });
       pages++;
@@ -67,11 +71,14 @@ try {
         const k = `${sku}|${lc}|${bin}`;
         agg.set(k, (agg.get(k) || 0) + qty);
       }
-      if (pages % 20 === 0) await progress(`lotlevel: ${pages} pages, ${rawRows} rows, ${pairs.size} sku-locations`);
       if (!d.hasMore || !(d.response || []).length) break;
-      if (page > 5000) throw new Error("pagination runaway");
+      if (page > 400) throw new Error(`pagination runaway at ${loc}`);
     }
+    locsDone++;
+    await progress(`lotlevel: ${locsDone}/${locs.length} locations (${loc}), ${pages} pages, ${rawRows} rows`);
+    } catch (e) { failed.push(`${loc}: ${String(e.message).slice(0, 80)}`); log(`location ${loc} failed: ${e.message}`); }
   }
+  if (failed.length === locs.length) throw new Error(`all locations failed: ${failed[0]}`);
   await progress(`lotlevel: fetched ${pages} pages, ${rawRows} rows, ${pairs.size} sku-locations; bins ${JSON.stringify(binsSeen).slice(0, 300)}`);
 
   // replace all rows for seen (sku, location) pairs: delete old bins, insert current
@@ -90,7 +97,7 @@ try {
   const stubs = skus.filter(s => !have.has(s)).map(sku => ({ sku, style_code: (/^([A-Z]+\d+)/.exec(sku) || [, sku])[1], updated_at: new Date(0).toISOString() }));
   if (stubs.length) await upsert("products", stubs, "sku");
 
-  await sb(`sync_runs?id=eq.${run.id}`, { method: "PATCH", body: { status: "ok", finished_at: new Date().toISOString(), rows_upserted: rows.length, progress: `lotlevel ok: ${rows.length} rows across ${byLoc.size} locations (${pairs.size} sku-locations, ${days}d lookback, ${pages} pages)` } });
+  await sb(`sync_runs?id=eq.${run.id}`, { method: "PATCH", body: { status: "ok", finished_at: new Date().toISOString(), rows_upserted: rows.length, progress: `lotlevel ok: ${rows.length} rows across ${byLoc.size} locations (${pairs.size} sku-locations, ${days}d lookback, ${pages} pages)${failed.length ? "; FAILED " + failed.join(" | ") : ""}` } });
   log("done");
 } catch (e) {
   log("FAILED", e.message);

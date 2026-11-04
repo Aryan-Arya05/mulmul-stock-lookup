@@ -1,0 +1,21 @@
+name: Sync stock (lot-level, all locations)
+on:
+  workflow_dispatch:
+    inputs:
+      lookback_days: { description: "Days of movement to pull", default: "2" }
+concurrency: { group: vinculum-sync, cancel-in-progress: false }
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: node scripts/sync-lotlevel.mjs
+        env:
+          VINCULUM_API_KEY: ${{ secrets.VINCULUM_API_KEY }}
+          VINCULUM_API_OWNER: ${{ secrets.VINCULUM_API_OWNER }}
+          SUPABASE_URL: https://idhtjxirqvaensqhozdc.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          LOOKBACK_DAYS: ${{ inputs.lookback_days || '2' }}

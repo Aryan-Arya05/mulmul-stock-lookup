@@ -13,7 +13,7 @@ jobs:
       - run: node scripts/probe-lot.mjs
         env:
           VINCULUM_API_KEY: ${{ secrets.VINCULUM_API_KEY }}
-          VINCULUM_API_OWNER: ${{ secrets.VINCULUM_API_OWNER }}
+          VINCULUM_API_OWNER: ceo
           PROBE_OWNER: ${{ inputs.owner }}
           SUPABASE_URL: https://idhtjxirqvaensqhozdc.supabase.co
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

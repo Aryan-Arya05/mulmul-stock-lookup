@@ -22,7 +22,7 @@ jobs:
       - run: node scripts/sync-vinculum.mjs
         env:
           VINCULUM_API_KEY: ${{ secrets.VINCULUM_API_KEY }}
-          VINCULUM_API_OWNER: ${{ secrets.VINCULUM_API_OWNER }}
+          VINCULUM_API_OWNER: ceo
           VINCULUM_ORG_ID: MULM
           SUPABASE_URL: https://idhtjxirqvaensqhozdc.supabase.co
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

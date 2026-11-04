@@ -205,20 +205,29 @@ try {
     const have = new Set();
     for (let i = 0; i < skusInStock.length; i += 500) {
       const chunk = skusInStock.slice(i, i + 500);
-      const got = await sb(`products?select=sku&sku=in.(${chunk.map(s => `"${s}"`).join(",")})`);
-      got.forEach(p => have.add(p.sku));
+      const got = await sb(`products?select=sku,product_name&sku=in.(${chunk.map(s => `"${s}"`).join(",")})`);
+      got.forEach(p => { if (p.product_name) have.add(p.sku); });
     }
     need = skusInStock.filter(s => !have.has(s));
   }
   log(`SKU details to fetch: ${need.length}`);
+  let skuWarn = null;
   if (need.length) {
-    const prods = await fetchSkuDetails(need, progress);
-    await upsert("products", prods, "sku");
-    // SKUs Vinculum returned nothing for: insert a stub so the app can still show the code
-    const got = new Set(prods.map(p => p.sku));
-    const stubs = need.filter(s => !got.has(s)).map(sku => ({ sku, style_code: parseStyle(sku), updated_at: new Date().toISOString() }));
-    if (stubs.length) { log(`stub products: ${stubs.length}`); await upsert("products", stubs, "sku"); }
+    try {
+      const prods = await fetchSkuDetails(need, progress);
+      await upsert("products", prods, "sku");
+      const got = new Set(prods.map(p => p.sku));
+      const stubs = need.filter(s => !got.has(s)).map(sku => ({ sku, style_code: parseStyle(sku), updated_at: new Date().toISOString() }));
+      if (stubs.length) { log(`stub products: ${stubs.length}`); await upsert("products", stubs, "sku"); }
+    } catch (e) {
+      // product details are nice-to-have; never block the stock write. Stub the SKUs so the app can show them by code.
+      skuWarn = `skuDetail failed (${String(e.message).slice(0, 160)}); ${need.length} SKUs written without names`;
+      log("WARNING", skuWarn);
+      const stubs = need.map(sku => ({ sku, style_code: parseStyle(sku), updated_at: new Date(0).toISOString() }));
+      await upsert("products", stubs, "sku");
+    }
   }
+
 
   // inventory rows were written per window above; final pass guarantees the merged latest state
   // Merge rule: the API's "good" qty per sku+location is the TOTAL across bins (physical + VIRTUAL-* + INTRANSIT).
@@ -241,7 +250,7 @@ try {
     await sb(`inventory?location_code=eq.${loc}&bin=not.in.(${[...VIRT, "PHYSICAL"].map(b => `"${b}"`).join(",")})&sku=in.(${chunk.map(s => `"${s}"`).join(",")})`, { method: "DELETE", prefer: "return=minimal" });
   }
   if (backfillDays) log("backfill mode: no purge (base comes from load-base)");
-  await sb(`sync_runs?id=eq.${run.id}`, { method: "PATCH", body: { status: "ok", finished_at: new Date().toISOString(), rows_upserted: invRows.length } });
+  await sb(`sync_runs?id=eq.${run.id}`, { method: "PATCH", body: { status: "ok", finished_at: new Date().toISOString(), rows_upserted: invRows.length, error: skuWarn } });
   log("done");
 } catch (e) {
   log("FAILED", e.message);

@@ -54,11 +54,11 @@ h2 small{color:var(--muted);font-weight:400;margin-left:8px}
 @media (prefers-color-scheme:dark){.chip.prod{background:#2b2240;color:#c8aef0}.chip.transit{background:#10303d;color:#7fcbe8}}
 table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;font-size:13px}
 th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line);vertical-align:middle;white-space:nowrap}
-th{font-weight:500;color:var(--muted);font-size:12px;background:var(--soft);cursor:pointer;user-select:none;position:sticky;top:52px}
+th{font-weight:500;color:var(--muted);font-size:12px;background:var(--soft);cursor:pointer;user-select:none}
 th.r,td.r{text-align:right}
 tr.click{cursor:pointer}tr.click:hover td{background:var(--soft)}
 .tw{overflow:auto;border-radius:12px}
-.drawer th,.ans th,#movers th{position:static}
+
 .thumb{width:34px;height:44px;object-fit:cover;border-radius:4px;background:var(--soft);display:block}
 .spark{vertical-align:middle}
 .trend.up{color:var(--good)}.trend.down{color:var(--bad)}
@@ -97,7 +97,7 @@ svg text{font-family:var(--sans);font-size:11px;fill:var(--muted)}
 .empty{color:var(--muted);padding:20px;text-align:center}
 .muted{color:var(--muted)}
 .right{margin-left:auto}
-@media (max-width:700px){th{top:0}.timeline{grid-template-columns:repeat(2,1fr)}}
+@media (max-width:700px){.timeline{grid-template-columns:repeat(2,1fr)}}
 </style>
 </head>
 <body>

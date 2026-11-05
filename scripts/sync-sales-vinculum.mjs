@@ -206,19 +206,37 @@ if (process.env.FROM_DATE) {
 log(`window ${fmtIST(from)} -> ${fmtIST(to)} via ${ENDPOINT}`);
 
 if (PROBE) {
-  const payload = await vin(ENDPOINT, buildBody(from, new Date(Math.min(to, from.getTime() + WINDOW_DAYS * 86400000)), 1));
-  const orders = findOrders(payload);
-  console.log("envelope keys:", Object.keys(payload), "responseCode:", payload.responseCode, payload.responseMessage, "style:", STYLES[styleIdx]);
-  console.log("raw head:", JSON.stringify(payload).slice(0, 1500));
-  console.log("orders on page 1:", orders.length);
-  if (orders.length) {
-    console.log("order keys:", Object.keys(orders[0]));
-    const items = pick(orders[0], "items", "orderItems", "lineItems") || [];
-    if (items.length) console.log("line keys:", Object.keys(items[0]));
-    console.log(JSON.stringify(orders[0], null, 2).slice(0, 3000));
-    console.log("flattened sample:", JSON.stringify(flatten(orders.slice(0, 2)), null, 2).slice(0, 2000));
+  const f = fmtIST(from), t = fmtIST(new Date(Math.min(to, from.getTime() + 2 * 86400000)));
+  const bodies = {
+    full_int:   buildBody(from, new Date(Math.min(to, from.getTime() + 2 * 86400000)), 1),
+    full_str:   { ...buildBody(from, new Date(Math.min(to, from.getTime() + 2 * 86400000)), 1), pageNumber: "1" },
+    no_reqtype: (() => { const b = { ...buildBody(from, new Date(Math.min(to, from.getTime() + 2 * 86400000)), 1), pageNumber: "1" }; delete b.reqType; return b; })(),
+    minimal:    { orderNo: "", fromDate: f, toDate: t, pageNumber: "1" },
+    strings:    { orderNo: "", statuses: "", fromDate: f, toDate: t, pageNumber: "1", order_Location: "", fulfillmentLocation: "", orderSource: "", paymentType: "", skuCodes: "", brand: "", IsReplacementOrder: "" },
+    dateType:   { orderNo: "", statuses: [], fromDate: f, toDate: t, pageNumber: "1", order_Location: "", fulfillmentLocation: "", orderSource: "", paymentType: [], skuCodes: [], brand: [], IsReplacementOrder: "", dateType: "orderDate" },
+    pull:       { fromDate: f, toDate: t, pageNumber: "1", filterBy: 2, orderLocation: "", status: "" },
+  };
+  const endpoints = (process.env.VINCULUM_PROBE_ENDPOINTS || "v2/order/status,v4/order/status,v1/order/orderPullV2,v2/order/orderPull").split(",");
+  for (const ep of endpoints) for (const [name, b] of Object.entries(bodies)) {
+    styleIdx = 1;
+    try {
+      const payload = await vin(ep, b);
+      const orders = findOrders(payload);
+      console.log(`\n=== ${ep} / ${name}: responseCode ${payload.responseCode} ${payload.responseMessage || ""} keys=${Object.keys(payload)} orders=${orders.length}`);
+      if (orders.length) {
+        console.log("order keys:", Object.keys(orders[0]));
+        const items = pick(orders[0], "items", "orderItems", "lineItems") || [];
+        if (items.length) console.log("line keys:", Object.keys(items[0]));
+        console.log(JSON.stringify(orders[0], null, 1).slice(0, 2500));
+        console.log("flattened:", JSON.stringify(flatten(orders.slice(0, 1)), null, 1).slice(0, 1200));
+        console.log(`\nWINNER: endpoint=${ep} body=${name}`);
+        process.exit(0);
+      }
+      if (Number(payload.responseCode) === 0 || payload._empty) { console.log(`accepted but empty; raw: ${JSON.stringify(payload).slice(0, 600)}`); }
+    } catch (e) { console.log(`\n=== ${ep} / ${name}: ${e.message.slice(0, 300)}`); }
   }
-  process.exit(0);
+  console.log("no variant returned orders");
+  process.exit(1);
 }
 
 await setState({ status: "running", last_run: new Date().toISOString(), detail: `window ${fmtIST(from)} -> ${fmtIST(to)}` });

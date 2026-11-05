@@ -10,13 +10,13 @@
 //           PROBE=1 (fetch one page, print the envelope, write nothing), TAIL_DAYS (default 3)
 
 const VIN_BASE = process.env.VINCULUM_BASE || "https://mulmul.vineretail.com/RestWS/api/eretail";
-const ENDPOINT = process.env.VINCULUM_ORDER_ENDPOINT || "v2/order/status";
+const ENDPOINT = process.env.VINCULUM_ORDER_ENDPOINT || "v2/order/orderPull";   // proven on this tenant (order/status rejects every body)
 const { VINCULUM_API_KEY, VINCULUM_API_OWNER, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = process.env;
 for (const k of ["VINCULUM_API_KEY", "VINCULUM_API_OWNER", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"])
   if (!process.env[k]) { console.error(`Missing env ${k}`); process.exit(1); }
 
 const PROBE = process.env.PROBE === "1";
-const TAIL_DAYS = Number(process.env.TAIL_DAYS || 3);
+const TAIL_DAYS = Number(process.env.TAIL_DAYS || 14);   // orderPull filters on order date; re-read 2 weeks so returns/cancellations update
 const PAGE_SIZE = 100;
 const MAX_PAGES_PER_WINDOW = 400;
 const WINDOW_DAYS = 7;
@@ -38,7 +38,7 @@ const MIN_GAP_MS = Number(process.env.VINCULUM_MIN_GAP_MS || 3000);
 // Transport styles: the tenant accepts form-encoded RequestBody for most endpoints; which auth placement
 // works varies per endpoint, so we try: form fields only -> form + headers -> JSON body, and remember the winner.
 const STYLES = ["form", "form+headers", "json"];
-let styleIdx = Number(process.env.VINCULUM_STYLE_INDEX || 0);
+let styleIdx = Number(process.env.VINCULUM_STYLE_INDEX || 1);
 async function vin(path, body, attempt = 1) {
   const json = JSON.stringify(body);
   const style = STYLES[styleIdx];
@@ -104,9 +104,12 @@ function buildBody(from, to, page) {
 // The order list sits under a key that varies by endpoint/version. Find the first list of order-like dicts.
 function findOrders(payload) {
   if (!payload || typeof payload !== "object") return [];
-  const looks = v => Array.isArray(v) && v.length && typeof v[0] === "object" && ["orderNo", "orderNumber", "OrderNo"].some(k => k in v[0]);
-  for (const v of Object.values(payload)) if (looks(v)) return v;
-  for (const v of Object.values(payload)) if (v && typeof v === "object" && !Array.isArray(v)) for (const inner of Object.values(v)) if (looks(inner)) return inner;
+  const isOrder = o => o && typeof o === "object" && ["orderNo", "orderNumber", "OrderNo"].some(k => k in o);
+  // orderPull returns [{ "<orderNo>": {...order} }, ...]; unwrap that shape
+  const unwrap = v => v.map(o => isOrder(o) ? o : (o && typeof o === "object" && Object.keys(o).length === 1 && isOrder(Object.values(o)[0]) ? Object.values(o)[0] : null)).filter(Boolean);
+  const looks = v => Array.isArray(v) && v.length && unwrap(v).length;
+  for (const v of Object.values(payload)) if (looks(v)) return unwrap(v);
+  for (const v of Object.values(payload)) if (v && typeof v === "object" && !Array.isArray(v)) for (const inner of Object.values(v)) if (looks(inner)) return unwrap(inner);
   for (const v of Object.values(payload)) if (Array.isArray(v) && v.length === 0) return [];
   return [];
 }
@@ -216,8 +219,8 @@ if (PROBE) {
     dateType:   { orderNo: "", statuses: [], fromDate: f, toDate: t, pageNumber: "1", order_Location: "", fulfillmentLocation: "", orderSource: "", paymentType: [], skuCodes: [], brand: [], IsReplacementOrder: "", dateType: "orderDate" },
     pull:       { fromDate: f, toDate: t, pageNumber: "1", filterBy: 2, orderLocation: "", status: "" },
   };
-  const endpoints = (process.env.VINCULUM_PROBE_ENDPOINTS || "v2/order/status,v4/order/status,v1/order/orderPullV2,v2/order/orderPull").split(",");
-  for (const ep of endpoints) for (const [name, b] of Object.entries(bodies)) {
+  const endpoints = (process.env.VINCULUM_PROBE_ENDPOINTS || "v2/order/orderPull").split(",");
+  for (const ep of endpoints) for (const [name, b] of Object.entries(bodies).slice(0, 1)) {
     styleIdx = 1;
     try {
       const payload = await vin(ep, b);
@@ -251,7 +254,8 @@ try {
       log(`  ${fmtIST(ws).slice(0, 10)}..${fmtIST(we).slice(0, 10)} page ${page}: ${list.length} orders`);
       if (!list.length) break;
       orders.push(...list);
-      if (list.length < PAGE_SIZE) break;
+      const totalPages = Number(payload.totalPages || 0);
+      if (totalPages ? page >= totalPages : list.length < PAGE_SIZE) break;
     }
     const rows = flatten(orders);
     if (rows.length) {

@@ -1,0 +1,53 @@
+name: Sync sales (sheet + Vinculum orders)
+on:
+  schedule:
+    - cron: "15,45 * * * *"          # every 30 min, offset from the stock sync
+  workflow_dispatch:
+    inputs:
+      probe:
+        description: "Vinculum: fetch one page and print the envelope, write nothing"
+        type: boolean
+        default: false
+      from_date:
+        description: "Vinculum backfill from (dd/MM/yyyy). Leave blank for incremental."
+        type: string
+        default: ""
+      to_date:
+        description: "Vinculum backfill to (dd/MM/yyyy). Blank = now."
+        type: string
+        default: ""
+      sheet_sales:
+        description: "Also load the Sale Report tab into sale_lines (source=sheet)"
+        type: boolean
+        default: false
+      skip_vinculum:
+        description: "Skip the Vinculum order pull (sheet only)"
+        type: boolean
+        default: false
+concurrency: { group: sales-sync, cancel-in-progress: false }
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: Sheet -> replenishment (+ sale lines on request)
+        run: node scripts/sync-sales-sheet.mjs
+        env:
+          SUPABASE_URL: https://idhtjxirqvaensqhozdc.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SYNC_SHEET_SALES: ${{ inputs.sheet_sales == true && '1' || '' }}
+      - name: Vinculum orders -> sale_lines
+        if: ${{ inputs.skip_vinculum != true }}
+        run: node scripts/sync-sales-vinculum.mjs
+        env:
+          VINCULUM_API_KEY: ${{ secrets.VINCULUM_API_KEY }}
+          VINCULUM_API_OWNER: ceo
+          VINCULUM_ORG_ID: MULM
+          SUPABASE_URL: https://idhtjxirqvaensqhozdc.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          PROBE: ${{ inputs.probe == true && '1' || '' }}
+          FROM_DATE: ${{ inputs.from_date }}
+          TO_DATE: ${{ inputs.to_date }}

@@ -242,6 +242,50 @@ if (PROBE) {
   process.exit(1);
 }
 
+// ---------- full-history backfill (BACKFILL=1): walk backward in 7-day windows, resumable, time-budgeted ----------
+if (process.env.BACKFILL === "1") {
+  const BUDGET_MS = Number(process.env.BACKFILL_BUDGET_MIN || 300) * 60000;
+  const EMPTY_STOP = Number(process.env.BACKFILL_EMPTY_WINDOWS || 26);      // ~6 months of empty windows = end of history
+  const t0 = Date.now();
+  const bset = patch => sb("sync_state?on_conflict=job", { method: "POST", body: [{ job: "vinculum_backfill", ...patch }], prefer: "resolution=merge-duplicates,return=minimal" });
+  const [st] = await sb("sync_state?job=eq.vinculum_backfill&select=*");
+  if (st?.status === "done") { log("backfill already complete:", st.detail); process.exit(0); }
+  let cursor = st?.watermark ? new Date(st.watermark) : parseDMY(process.env.BACKFILL_START || "20/09/2026");
+  let empties = Number((st?.detail || "").match(/empties=(\d+)/)?.[1] || 0);
+  let total = 0, windows = 0;
+  await bset({ status: "running", last_run: new Date().toISOString(), watermark: cursor.toISOString(), detail: `resuming at ${fmtIST(cursor)} empties=${empties}` });
+  try {
+    while (Date.now() - t0 < BUDGET_MS && empties < EMPTY_STOP) {
+      const we = new Date(cursor.getTime() - 1000), ws = new Date(cursor.getTime() - WINDOW_DAYS * 86400000);
+      const orders = [];
+      for (let page = 1; page <= MAX_PAGES_PER_WINDOW; page++) {
+        const payload = await vin(ENDPOINT, buildBody(ws, we, page));
+        const list = payload._empty ? [] : findOrders(payload);
+        if (!list.length) break;
+        orders.push(...list);
+        const totalPages = Number(payload.totalPages || 0);
+        if (totalPages ? page >= totalPages : list.length < PAGE_SIZE) break;
+      }
+      const rows = flatten(orders);
+      if (rows.length) await upsert("sale_lines", rows, "source,order_no,sku,line_key");
+      empties = orders.length ? 0 : empties + 1;
+      total += rows.length; windows++;
+      cursor = ws;
+      log(`  ${fmtIST(ws).slice(0, 10)}..${fmtIST(we).slice(0, 10)}: ${orders.length} orders, ${rows.length} lines`);
+      await bset({ watermark: cursor.toISOString(), detail: `reached ${fmtIST(cursor).slice(0, 10)}; this run ${total} lines over ${windows} windows; empties=${empties}` });
+    }
+    const done = empties >= EMPTY_STOP;
+    await bset({ status: done ? "done" : "paused", last_run: new Date().toISOString(), watermark: cursor.toISOString(), detail: `${done ? "complete" : "budget reached"} at ${fmtIST(cursor).slice(0, 10)}; last run ${total} lines; empties=${empties}` });
+    await sb("rpc/refresh_sales_views", { method: "POST", body: {} });
+    log(done ? "BACKFILL COMPLETE" : "budget reached; will continue next run");
+    process.exit(0);
+  } catch (e) {
+    log("FAILED", e.message);
+    await bset({ status: "error", detail: e.message.slice(0, 800), watermark: cursor.toISOString() }).catch(() => {});
+    process.exit(1);
+  }
+}
+
 await setState({ status: "running", last_run: new Date().toISOString(), detail: `window ${fmtIST(from)} -> ${fmtIST(to)}` });
 try {
   let total = 0, maxSeen = from;

@@ -1,0 +1,41 @@
+name: Backfill sales history (Vinculum)
+on:
+  workflow_dispatch:
+    inputs:
+      budget_min:
+        description: "Minutes to run before pausing (job re-dispatches itself until history is exhausted)"
+        default: "300"
+permissions:
+  actions: write
+  contents: read
+concurrency: { group: sales-backfill, cancel-in-progress: false }
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: Pull one budget's worth of history
+        run: node scripts/sync-sales-vinculum.mjs
+        env:
+          BACKFILL: "1"
+          BACKFILL_BUDGET_MIN: ${{ inputs.budget_min || '300' }}
+          VINCULUM_API_KEY: ${{ secrets.VINCULUM_API_KEY }}
+          VINCULUM_API_OWNER: ceo
+          VINCULUM_ORG_ID: MULM
+          SUPABASE_URL: https://idhtjxirqvaensqhozdc.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      - name: Continue if history is not exhausted
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          STATUS=$(curl -s "https://idhtjxirqvaensqhozdc.supabase.co/rest/v1/sync_state?job=eq.vinculum_backfill&select=status" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" | sed 's/.*"status":"\([a-z]*\)".*/\1/')
+          echo "backfill status: $STATUS"
+          if [ "$STATUS" = "paused" ]; then
+            sleep 60
+            gh workflow run backfill-sales.yml -R ${{ github.repository }} -f budget_min=${{ inputs.budget_min || '300' }}
+          fi

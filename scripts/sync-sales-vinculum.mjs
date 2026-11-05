@@ -276,7 +276,7 @@ if (process.env.BACKFILL === "1") {
     }
     const done = empties >= EMPTY_STOP;
     await bset({ status: done ? "done" : "paused", last_run: new Date().toISOString(), watermark: cursor.toISOString(), detail: `${done ? "complete" : "budget reached"} at ${fmtIST(cursor).slice(0, 10)}; last run ${total} lines; empties=${empties}` });
-    await sb("rpc/refresh_sales_views", { method: "POST", body: {} });
+    await sb("rpc/refresh_sales_views", { method: "POST", body: {} }).catch(e => log("view refresh deferred to the DB cron (", e.message.slice(0, 80), ")"));
     log(done ? "BACKFILL COMPLETE" : "budget reached; will continue next run");
     process.exit(0);
   } catch (e) {
@@ -311,7 +311,7 @@ try {
   }
   // Watermark = end of the window actually fetched (status-update time), not max order date.
   await setState({ status: "ok", watermark: to.toISOString(), last_run: new Date().toISOString(), detail: `wrote ${total} lines; window ${fmtIST(from)} -> ${fmtIST(to)}` });
-  await sb("rpc/refresh_sales_views", { method: "POST", body: {} });
+  await sb("rpc/refresh_sales_views", { method: "POST", body: {} }).catch(e => log("view refresh deferred to the DB cron (", e.message.slice(0, 80), ")"));
   log(`done: ${total} lines; views refreshed`);
 } catch (e) {
   log("FAILED", e.message);

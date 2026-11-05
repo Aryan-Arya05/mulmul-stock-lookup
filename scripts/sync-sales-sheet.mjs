@@ -168,7 +168,7 @@ try {
     const m = await syncSheetSales();
     await setState("sheet_sales", { status: "ok", last_run: new Date().toISOString(), detail: `${m} lines` });
   }
-  await sb("rpc/refresh_sales_views", { method: "POST", body: {} });
+  await sb("rpc/refresh_sales_views", { method: "POST", body: {} }).catch(e => log("view refresh deferred to the DB cron (", e.message.slice(0, 80), ")"));
   log("materialized views refreshed");
 } catch (e) {
   log("FAILED", e.message);

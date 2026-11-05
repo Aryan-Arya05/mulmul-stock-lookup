@@ -28,8 +28,12 @@ function parseCsv(text) {
   if (field.length || row.length) { row.push(field); rows.push(row); }
   return rows;
 }
+const GIDS = { "Replenishment sheet": 0, "Sale Report": 630341754, "Designers Report": 26648738, "Inventory": 531969054 };
 async function fetchTab(name) {
-  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(name)}`;
+  // /export?format=csv gives the grid exactly as displayed (gviz re-types columns and drops some); gid from GIDS.
+  const url = GIDS[name] !== undefined
+    ? `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${GIDS[name]}`
+    : `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(name)}`;
   const r = await fetch(url, { redirect: "follow" });
   if (!r.ok) throw new Error(`sheet tab "${name}": HTTP ${r.status}. Is the sheet shared as "Anyone with the link"?`);
   const text = await r.text();
@@ -79,7 +83,14 @@ function sheetDateTime(v) {
   let iso = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/);
   if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}T${iso[4] || "00"}:${iso[5] || "00"}:${iso[6] || "00"}+05:30`;
   const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?/i);
-  if (!m) return null;
+  if (!m) {
+    const serial = Number(s);                                   // Sheets date serial (days since 1899-12-30)
+    if (Number.isFinite(serial) && serial > 40000 && serial < 60000) {
+      const ms = Math.round((serial - 25569) * 86400000); const dt = new Date(ms);
+      return `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}T${pad(dt.getUTCHours())}:${pad(dt.getUTCMinutes())}:00+05:30`;
+    }
+    return null;
+  }
   let h = Number(m[4] || 0);
   if (m[7]) { const ap = m[7].toUpperCase(); if (ap === "PM" && h < 12) h += 12; if (ap === "AM" && h === 12) h = 0; }
   return `${m[3]}-${pad(m[2])}-${pad(m[1])}T${pad(h)}:${m[5] || "00"}:${m[6] || "00"}+05:30`;
@@ -129,7 +140,7 @@ async function syncSheetSales() {
   log(`sample row: ${JSON.stringify(rows[0])}`);
   const occ = new Map(); const out = []; let skipped = 0;
   for (const r of rows) {
-    const orderNo = str(r["ExternOrderNo"]); const sku = str(r["SKU"]); const date = sheetDateTime(r["OrderDate"]);
+    const orderNo = str(r["ExternOrderNo"]); const sku = str(r["SKU"]); const date = sheetDateTime(r["OrderDate"]) || sheetDateTime(r["OrderDt"]);
     if (!orderNo || !sku || !date) { skipped++; continue; }
     const k = `${orderNo}|${sku}`; const n = (occ.get(k) || 0) + 1; occ.set(k, n);
     const channel = /store/i.test(r["Channel"]) ? "Store" : "Online";

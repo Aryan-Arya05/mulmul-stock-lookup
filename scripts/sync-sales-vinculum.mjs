@@ -35,25 +35,28 @@ const EXCLUDED_PREFIXES = ["M0", "MNW", "MWH", "NOO", "KAS", "PCPL", "KARTIK", "
 // ---------- Vinculum transport ----------
 let lastCall = 0;
 const MIN_GAP_MS = Number(process.env.VINCULUM_MIN_GAP_MS || 3000);
-const jsonStyle = new Set();  // endpoints that rejected the form body and want JSON
+// Transport styles: the tenant accepts form-encoded RequestBody for most endpoints; which auth placement
+// works varies per endpoint, so we try: form fields only -> form + headers -> JSON body, and remember the winner.
+const STYLES = ["form", "form+headers", "json"];
+let styleIdx = Number(process.env.VINCULUM_STYLE_INDEX || 0);
 async function vin(path, body, attempt = 1) {
   const json = JSON.stringify(body);
-  const asJson = jsonStyle.has(path);
+  const style = STYLES[styleIdx];
   const wait = lastCall + MIN_GAP_MS - Date.now();
   if (wait > 0) await sleep(wait);
   lastCall = Date.now();
+  const authHeaders = { ApiOwner: VINCULUM_API_OWNER, ApiKey: VINCULUM_API_KEY, OrgId: process.env.VINCULUM_ORG_ID || "MULM" };
   let r;
   try {
     r = await fetch(`${VIN_BASE}/${path}`, {
       signal: AbortSignal.timeout(180000),
       method: "POST",
       headers: {
-        ApiOwner: VINCULUM_API_OWNER, ApiKey: VINCULUM_API_KEY,
-        OrgId: process.env.VINCULUM_ORG_ID || "MULM",
-        ...(asJson ? { RequestBody: json } : {}),
-        "Content-Type": asJson ? "application/json" : "application/x-www-form-urlencoded", Accept: "application/json",
+        Accept: "application/json",
+        ...(style === "form" ? {} : authHeaders),
+        ...(style === "json" ? { RequestBody: json, "Content-Type": "application/json" } : { "Content-Type": "application/x-www-form-urlencoded" }),
       },
-      body: asJson ? json : new URLSearchParams({ RequestBody: json, ApiOwner: VINCULUM_API_OWNER, ApiKey: VINCULUM_API_KEY }).toString(),
+      body: style === "json" ? json : new URLSearchParams({ RequestBody: json, ApiOwner: VINCULUM_API_OWNER, ApiKey: VINCULUM_API_KEY }).toString(),
     });
   } catch (e) {
     if (attempt < 4) { log(`vinculum ${path} attempt ${attempt}: ${e.name} ${e.message}; retrying`); await sleep(5000 * attempt); return vin(path, body, attempt + 1); }
@@ -64,7 +67,11 @@ async function vin(path, body, attempt = 1) {
   try { data = JSON.parse(text); } catch {}
   const code = data ? Number(data.responseCode) : NaN;
   if (code === 1105) return { ...data, _empty: true };                      // "No Record Found"
-  if (code === 10058 && !asJson) { jsonStyle.add(path); log(`${path}: form body rejected (10058), retrying as JSON`); return vin(path, body, attempt); }
+  if ((code === 10058 || r.status === 415) && styleIdx < STYLES.length - 1) {
+    log(`${path}: style "${style}" rejected (${r.status} / ${code} ${data?.responseMessage || ""}), trying "${STYLES[styleIdx + 1]}"`);
+    styleIdx++;
+    return vin(path, body, attempt);
+  }
   if (code === 13) {                                                         // "API Hit Quota Exceeded"
     if (attempt > 8) throw new Error(`Vinculum ${path}: quota exceeded, gave up`);
     log(`quota hit on ${path}; waiting 65s (attempt ${attempt})`);
@@ -201,7 +208,8 @@ log(`window ${fmtIST(from)} -> ${fmtIST(to)} via ${ENDPOINT}`);
 if (PROBE) {
   const payload = await vin(ENDPOINT, buildBody(from, new Date(Math.min(to, from.getTime() + WINDOW_DAYS * 86400000)), 1));
   const orders = findOrders(payload);
-  console.log("envelope keys:", Object.keys(payload), "responseCode:", payload.responseCode, payload.responseMessage);
+  console.log("envelope keys:", Object.keys(payload), "responseCode:", payload.responseCode, payload.responseMessage, "style:", STYLES[styleIdx]);
+  console.log("raw head:", JSON.stringify(payload).slice(0, 1500));
   console.log("orders on page 1:", orders.length);
   if (orders.length) {
     console.log("order keys:", Object.keys(orders[0]));

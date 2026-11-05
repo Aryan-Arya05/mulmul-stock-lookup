@@ -1,0 +1,20 @@
+name: Load sales archive (2020-2025 files)
+on:
+  workflow_dispatch:
+    inputs:
+      years:
+        description: "Comma-separated years to load (blank = all)"
+        default: ""
+jobs:
+  load:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: node scripts/load-sales-archive.mjs
+        env:
+          SUPABASE_URL: https://idhtjxirqvaensqhozdc.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          YEARS: ${{ inputs.years }}

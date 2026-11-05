@@ -252,10 +252,12 @@ if (process.env.BACKFILL === "1") {
   if (st?.status === "done") { log("backfill already complete:", st.detail); process.exit(0); }
   let cursor = st?.watermark ? new Date(st.watermark) : parseDMY(process.env.BACKFILL_START || "20/09/2026");
   let empties = Number((st?.detail || "").match(/empties=(\d+)/)?.[1] || 0);
+  const STOP_AT = process.env.BACKFILL_STOP_DATE ? parseDMY(process.env.BACKFILL_STOP_DATE) : null;   // history before this comes from the archive load
+  if (STOP_AT && cursor <= STOP_AT) { await bset({ status: "done", last_run: new Date().toISOString(), detail: `complete: reached stop date ${fmtIST(STOP_AT).slice(0, 10)}` }); log("backfill reached stop date"); process.exit(0); }
   let total = 0, windows = 0;
   await bset({ status: "running", last_run: new Date().toISOString(), watermark: cursor.toISOString(), detail: `resuming at ${fmtIST(cursor)} empties=${empties}` });
   try {
-    while (Date.now() - t0 < BUDGET_MS && empties < EMPTY_STOP) {
+    while (Date.now() - t0 < BUDGET_MS && empties < EMPTY_STOP && !(STOP_AT && cursor <= STOP_AT)) {
       const we = new Date(cursor.getTime() - 1000), ws = new Date(cursor.getTime() - WINDOW_DAYS * 86400000);
       const orders = [];
       for (let page = 1; page <= MAX_PAGES_PER_WINDOW; page++) {
@@ -274,7 +276,7 @@ if (process.env.BACKFILL === "1") {
       log(`  ${fmtIST(ws).slice(0, 10)}..${fmtIST(we).slice(0, 10)}: ${orders.length} orders, ${rows.length} lines`);
       await bset({ watermark: cursor.toISOString(), detail: `reached ${fmtIST(cursor).slice(0, 10)}; this run ${total} lines over ${windows} windows; empties=${empties}` });
     }
-    const done = empties >= EMPTY_STOP;
+    const done = empties >= EMPTY_STOP || (STOP_AT && cursor <= STOP_AT);
     await bset({ status: done ? "done" : "paused", last_run: new Date().toISOString(), watermark: cursor.toISOString(), detail: `${done ? "complete" : "budget reached"} at ${fmtIST(cursor).slice(0, 10)}; last run ${total} lines; empties=${empties}` });
     await sb("rpc/refresh_sales_views", { method: "POST", body: {} }).catch(e => log("view refresh deferred to the DB cron (", e.message.slice(0, 80), ")"));
     log(done ? "BACKFILL COMPLETE" : "budget reached; will continue next run");

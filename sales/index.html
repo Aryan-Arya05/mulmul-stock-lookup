@@ -292,7 +292,7 @@ function renderOverview(){
   $("#movers").querySelectorAll("tr.click").forEach(tr => tr.onclick = () => openDrawer(tr.dataset.k));
 }
 function covChip(r){ return r.coverage==="Covered" ? `<span class="chip good">Covered</span>` : `<span class="chip bad">Short ${n0(r.shortfall)}</span>`; }
-function stageChip(s){ const c = s==="Delivered"?"good": s==="No replenishment"?"none": s==="Ordered"?"warn":"prod"; return `<span class="chip ${c}">${esc(s)}</span>`; }
+function stageChip(s){ const c = s==="Delivered"?"good": s==="Overdue"?"bad": s==="No replenishment"?"none": s==="Ordered"?"warn":"prod"; return `<span class="chip ${c}">${esc(s)}</span>`; }
 
 // ---------- Replenishment table ----------
 let rSort = {k:"shortfall", dir:-1};

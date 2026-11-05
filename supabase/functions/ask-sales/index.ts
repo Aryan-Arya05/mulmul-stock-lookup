@@ -57,7 +57,7 @@ v_replenishment_formula — THE replenishment report, one row per replenished st
   on_hand, pipeline_qty, total_repl (qty already ordered), after_repl_total = on_hand + total_repl,
   shortfall = formula_qty - after_repl_total (positive = need to make more), coverage 'Short'|'Covered', days_of_cover,
   units_7d vs units_prev_7d (trend), online_units/store_units,
-  production_stage ('No replenishment','Ordered','Fabric / Embroidery','Cutting / Stitching','Delivered'), emb_fabric_date, cutting_date,
+  production_stage ('No replenishment','Ordered','Fabric / Embroidery','Cutting / Stitching','Delivered','Overdue' = past expected delivery but stock still in production), emb_fabric_date, cutting_date,
   expected_delivery, days_in_production, days_to_delivery, image_url.
 v_launch_summary — totals per collection/launch.
 settings — production_lead_days, buffer_multiplier. locations — store master (code, display_name, city, type).

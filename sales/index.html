@@ -337,7 +337,8 @@ async function openDrawer(key){
   const wk={}; weekly.forEach(w=>{ wk[w.week_start] ??= {label:d(w.week_start),a:0,b:0}; if(w.channel==="Online") wk[w.week_start].a+=+w.units; else wk[w.week_start].b+=+w.units; });
   const sz={}; const order=["XXS","XS","S","M","L","XL","XXL","2XL","3XL","4XL","5XL","6XL"]; sizes.forEach(s=>{ const k=s.size||"–"; sz[k] ??= {label:k,a:0,b:0}; if(s.channel==="Online") sz[k].a+=+s.units; else sz[k].b+=+s.units; });
   const szRows = Object.values(sz).sort((a,b)=> (order.indexOf(a.label)+1||99)-(order.indexOf(b.label)+1||99));
-  const stores = S.stores.filter(s=>s.style_code===style&&s.colour===colour).sort((a,b)=>b.units-a.units).slice(0,12).map(s=>({label:s.location_name||"?",a:0,b:+s.units}));
+  const stM = {}; S.stores.filter(s=>s.style_code===style&&s.colour===colour).forEach(s=>{ const k=s.location_name||"?"; stM[k]=(stM[k]||0)+ +s.units; });
+  const stores = Object.entries(stM).sort((a,b)=>b[1]-a[1]).slice(0,12).map(([k,v])=>({label:k,a:0,b:v}));
   const st={}; stock.forEach(x=>{ const k = x.location_type==="WH" ? (["INTRANSIT","VIRTUAL-PRODUCTION","VIR-STORE"].includes((x.bin||"").toUpperCase()) ? title(x.bin) : "Warehouse") : x.location_name; st[k] ??= {}; st[k][x.size||"–"]=(st[k][x.size||"–"]||0)+x.qty; });
   const stSizes = [...new Set(stock.map(x=>x.size||"–"))].sort((a,b)=>(order.indexOf(a)+1||99)-(order.indexOf(b)+1||99));
   const last14 = daily.slice(-14).reduce((t,x)=>t+ +x.units,0);
@@ -437,7 +438,8 @@ async function ask(){
 
 // ---------- tabs ----------
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => { document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("on",x===b)); document.querySelectorAll("main section").forEach(s=>s.classList.toggle("on",s.id===b.dataset.tab)); location.hash=b.dataset.tab; });
-if(location.hash){ const b=document.querySelector(`nav button[data-tab="${location.hash.slice(1)}"]`); b&&b.click(); }
+function goHash(){ const b=document.querySelector(`nav button[data-tab="${location.hash.slice(1)}"]`); if(b && !b.classList.contains("on")) b.click(); }
+window.addEventListener("hashchange", goHash); goHash();
 load().catch(e => { $("#launchCards").innerHTML = `<div class="empty err">${esc(e.message)}</div>`; });
 </script>
 </body>

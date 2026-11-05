@@ -76,6 +76,8 @@ function dmy(v) {
 // "02/11/2026 11:39 PM" (IST) -> ISO with +05:30
 function sheetDateTime(v) {
   const s = str(v); if (!s) return null;
+  let iso = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}T${iso[4] || "00"}:${iso[5] || "00"}:${iso[6] || "00"}+05:30`;
   const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?/i);
   if (!m) return null;
   let h = Number(m[4] || 0);
@@ -123,6 +125,8 @@ async function syncReplenishment() {
 async function syncSheetSales() {
   const locs = new Set((await sb("locations?select=code")).map(l => l.code));
   const rows = await fetchTab("Sale Report");
+  log(`sale report: ${rows.length} rows; headers: ${Object.keys(rows[0] || {}).join(" | ")}`);
+  log(`sample row: ${JSON.stringify(rows[0])}`);
   const occ = new Map(); const out = []; let skipped = 0;
   for (const r of rows) {
     const orderNo = str(r["ExternOrderNo"]); const sku = str(r["SKU"]); const date = sheetDateTime(r["OrderDate"]);

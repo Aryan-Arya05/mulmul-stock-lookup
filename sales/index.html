@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#1f2a44">
+<title>Mulmul Sales & Replenishment</title>
+<link rel="icon" href="../icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+:root{
+  --bg:#f6f5f1; --card:#fff; --fg:#1b1f2a; --muted:#6b7080; --line:#e3e1da; --soft:#efede7;
+  --accent:#1f2a44; --accent-fg:#fff;
+  --online:#2a78d6; --store:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4; --s6:#6250d6;
+  --good:#1d7a4a; --good-bg:#e6f4ec; --warn:#9a6a00; --warn-bg:#fbf1d6; --bad:#b3261e; --bad-bg:#fbe7e5; --none:#8a8f9c; --none-bg:#eeeeea;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif; --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root{--bg:#14161c;--card:#1d2029;--fg:#eef0f4;--muted:#9aa0ae;--line:#2c303b;--soft:#262932;--accent:#c9d4ee;--accent-fg:#14161c;
+  --online:#3987e5;--store:#d95926;--good:#6fd49a;--good-bg:#16301f;--warn:#f0c15a;--warn-bg:#3a2d10;--bad:#f28b85;--bad-bg:#3d1c1a;--none-bg:#262932}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 var(--sans);-webkit-font-smoothing:antialiased}
+a{color:inherit}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+header{position:sticky;top:0;z-index:20;background:var(--bg);border-bottom:1px solid var(--line)}
+.bar{max-width:1280px;margin:0 auto;padding:10px 16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.brand{font-weight:600;font-size:15px;display:flex;align-items:center;gap:8px}
+.brand small{color:var(--muted);font-weight:400}
+nav{display:flex;gap:2px;background:var(--soft);padding:3px;border-radius:10px}
+nav button{border:0;background:transparent;padding:6px 12px;border-radius:8px;color:var(--muted);font-weight:500}
+nav button.on{background:var(--card);color:var(--fg);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.fresh{margin-left:auto;color:var(--muted);font-size:12px;display:flex;gap:10px;flex-wrap:wrap}
+.fresh b{color:var(--fg);font-weight:500}
+main{max-width:1280px;margin:0 auto;padding:16px}
+section{display:none}section.on{display:block}
+h2{font-size:16px;margin:18px 0 10px;font-weight:600}
+h2 small{color:var(--muted);font-weight:400;margin-left:8px}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
+.card .t{font-weight:600;margin-bottom:6px;display:flex;justify-content:space-between;gap:8px}
+.kv{display:grid;grid-template-columns:1fr auto;gap:2px 10px;font-size:13px}
+.kv span{color:var(--muted)}
+.hero{font-size:26px;font-weight:600;line-height:1.1;margin:4px 0 8px}
+.hero small{font-size:12px;color:var(--muted);font-weight:400;margin-left:6px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:8px 0}
+.filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0 12px}
+.filters select,.filters input{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 10px}
+.filters input[type=search]{min-width:220px}
+.chip{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:500;white-space:nowrap}
+.chip.good{background:var(--good-bg);color:var(--good)}.chip.bad{background:var(--bad-bg);color:var(--bad)}.chip.warn{background:var(--warn-bg);color:var(--warn)}.chip.none{background:var(--none-bg);color:var(--none)}
+.chip.prod{background:#efe8f8;color:#5b3a8c}.chip.transit{background:#e2f1f7;color:#0b6e8f}
+@media (prefers-color-scheme:dark){.chip.prod{background:#2b2240;color:#c8aef0}.chip.transit{background:#10303d;color:#7fcbe8}}
+table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;font-size:13px}
+th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line);vertical-align:middle;white-space:nowrap}
+th{font-weight:500;color:var(--muted);font-size:12px;background:var(--soft);cursor:pointer;user-select:none;position:sticky;top:52px}
+th.r,td.r{text-align:right}
+tr.click{cursor:pointer}tr.click:hover td{background:var(--soft)}
+.tw{overflow:auto;border-radius:12px}
+.thumb{width:34px;height:44px;object-fit:cover;border-radius:4px;background:var(--soft);display:block}
+.spark{vertical-align:middle}
+.trend.up{color:var(--good)}.trend.down{color:var(--bad)}
+.legend{display:flex;gap:14px;font-size:12px;color:var(--muted);margin:4px 0}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.chart{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
+.chart h3{margin:0 0 6px;font-size:13px;font-weight:600}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:12px}
+svg text{font-family:var(--sans);font-size:11px;fill:var(--muted)}
+.tip{position:fixed;pointer-events:none;background:var(--fg);color:var(--bg);padding:6px 9px;border-radius:6px;font-size:12px;z-index:50;display:none;white-space:nowrap}
+/* drawer */
+.drawer{position:fixed;inset:0 0 0 auto;width:min(760px,100%);background:var(--bg);border-left:1px solid var(--line);z-index:30;transform:translateX(100%);transition:transform .2s;overflow:auto;padding:16px}
+.drawer.on{transform:none}
+.drawer .head{display:flex;gap:14px;align-items:flex-start}
+.drawer .head img{width:84px;height:110px;object-fit:cover;border-radius:8px;background:var(--soft)}
+.drawer .x{margin-left:auto;border:1px solid var(--line);background:var(--card);border-radius:8px;padding:4px 10px}
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.25);z-index:25;display:none}.scrim.on{display:block}
+.formula{font-family:var(--mono);font-size:12px;background:var(--soft);padding:8px 10px;border-radius:8px;line-height:1.6}
+.timeline{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:8px 0}
+.step{border:1px solid var(--line);border-radius:8px;padding:8px;font-size:12px;background:var(--card)}
+.step.done{border-color:var(--good);background:var(--good-bg)}.step.now{border-color:var(--online)}
+.step b{display:block;font-weight:500}.step span{color:var(--muted)}
+/* ask */
+.ask{max-width:860px}
+.askbox{display:flex;gap:8px}
+.askbox input{flex:1;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:11px 14px;font-size:15px}
+.askbox button{background:var(--accent);color:var(--accent-fg);border:0;border-radius:10px;padding:0 18px;font-weight:600}
+.sugg{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}
+.sugg button{background:var(--card);border:1px solid var(--line);border-radius:999px;padding:5px 11px;font-size:12px;color:var(--muted)}
+.ans{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin:12px 0}
+.ans .q{color:var(--muted);font-size:12px;margin-bottom:6px}
+.ans .a{font-size:15px;line-height:1.5;margin-bottom:10px}
+.ans details{font-size:12px;color:var(--muted);margin-top:8px}
+.ans pre{white-space:pre-wrap;font-family:var(--mono);font-size:11px;background:var(--soft);padding:8px;border-radius:8px}
+.err{color:var(--bad)}
+.empty{color:var(--muted);padding:20px;text-align:center}
+.muted{color:var(--muted)}
+.right{margin-left:auto}
+@media (max-width:700px){th{top:0}.timeline{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<header><div class="bar">
+  <div class="brand">Mulmul <small>Sales · Replenishment · Production</small></div>
+  <nav>
+    <button data-tab="overview" class="on">Overview</button>
+    <button data-tab="repl">Replenishment</button>
+    <button data-tab="attr">Attributes</button>
+    <button data-tab="prod">Production</button>
+    <button data-tab="ask">Ask</button>
+  </nav>
+  <div class="fresh" id="fresh"></div>
+</div></header>
+<main>
+  <section id="overview" class="on">
+    <h2>Launches <small id="ovNote"></small></h2>
+    <div class="cards" id="launchCards"></div>
+    <div class="grid2" style="margin-top:14px">
+      <div class="chart"><h3>Units per week — online vs store</h3><div class="legend"><span><i style="background:var(--online)"></i>Online</span><span><i style="background:var(--store)"></i>Store</span></div><div id="chWeekly"></div></div>
+      <div class="chart"><h3>Top movers, last 7 days <span class="muted">(replenished styles)</span></h3><div id="movers"></div></div>
+    </div>
+  </section>
+
+  <section id="repl">
+    <h2>Replenishment report <small>live version of the Designers Report — formula = sold ÷ days selling × lead × buffer</small></h2>
+    <div class="filters">
+      <input type="search" id="rSearch" placeholder="Search style, colour, fabric…">
+      <select id="rColl"><option value="">All launches</option></select>
+      <select id="rCov"><option value="">Short + Covered</option><option>Short</option><option>Covered</option></select>
+      <select id="rStage"><option value="">All stages</option></select>
+      <span class="right muted" id="rCount"></span>
+    </div>
+    <div class="tw"><table id="rTable"></table></div>
+  </section>
+
+  <section id="attr">
+    <h2>What is selling, by attribute <small>units sold, all styles</small></h2>
+    <div class="filters">
+      <select id="aDim">
+        <option value="product_name">Style</option><option value="colour">Colour</option><option value="category">Category</option>
+        <option value="fabric">Fabric</option><option value="collection">Launch / collection</option><option value="size">Size</option><option value="location_name">Store</option>
+      </select>
+      <select id="aWeeks"><option value="1">This week</option><option value="2">Last 2 weeks</option><option value="4" selected>Last 4 weeks</option><option value="8">Last 8 weeks</option><option value="52">All time</option></select>
+      <select id="aChan"><option value="">Online + Store</option><option>Online</option><option>Store</option></select>
+      <select id="aCat"><option value="">All categories</option></select>
+      <input type="search" id="aSearch" placeholder="Filter…">
+    </div>
+    <div class="grid2"><div class="chart"><h3 id="aTitle"></h3><div class="legend"><span><i style="background:var(--online)"></i>Online</span><span><i style="background:var(--store)"></i>Store</span></div><div id="chAttr"></div></div><div class="tw"><table id="aTable"></table></div></div>
+  </section>
+
+  <section id="prod">
+    <h2>Production tracker <small>stage from the Replenishment sheet dates · lead benchmark from settings</small></h2>
+    <div class="cards" id="prodCards"></div>
+    <div class="filters" style="margin-top:12px"><select id="pColl"><option value="">All launches</option></select><select id="pStage"><option value="">All stages</option></select></div>
+    <div class="tw"><table id="pTable"></table></div>
+  </section>
+
+  <section id="ask"><div class="ask">
+    <h2>Ask anything <small>answers are computed live from the same data as the tables</small></h2>
+    <form class="askbox" id="askForm"><input id="askIn" placeholder="e.g. Which fuchsia styles sold best in stores in the last 3 weeks?" autocomplete="off"><button>Ask</button></form>
+    <div class="sugg" id="sugg"></div>
+    <div id="answers"></div>
+  </div></section>
+</main>
+<div class="scrim" id="scrim"></div>
+<div class="drawer" id="drawer"></div>
+<div class="tip" id="tip"></div>
+
+<script>
+const SUPABASE_URL = "https://idhtjxirqvaensqhozdc.supabase.co";
+const SUPABASE_KEY = "sb_publishable_AQumcF8aqgNNdrOtSCp4Ig_fBJWSnEK";
+const ASK_URL = `${SUPABASE_URL}/functions/v1/ask-sales`;
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const n0 = v => v == null ? "–" : Math.round(Number(v)).toLocaleString("en-IN");
+const n1 = v => v == null ? "–" : Number(v).toLocaleString("en-IN",{maximumFractionDigits:1});
+const d = v => v ? new Date(v).toLocaleDateString("en-IN",{day:"numeric",month:"short"}) : "–";
+const title = s => String(s||"").toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+
+async function q(path){
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } });
+  if(!r.ok) throw new Error(`${path}: ${r.status} ${await r.text()}`);
+  return r.json();
+}
+async function qAll(path, page=5000){ // page through PostgREST
+  let out=[], from=0;
+  for(;;){ const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { headers:{ apikey:SUPABASE_KEY, Authorization:`Bearer ${SUPABASE_KEY}`, Range:`${from}-${from+page-1}` } });
+    if(!r.ok) throw new Error(`${path}: ${r.status}`); const rows = await r.json(); out.push(...rows); if(rows.length<page) return out; from+=page; }
+}
+
+// ---------- state ----------
+const S = { repl:[], launches:[], weekly:[], summary:[], stores:[], sync:[], settings:{} };
+const mondayOf = dt => { const x = new Date(dt); const day = (x.getDay()+6)%7; x.setDate(x.getDate()-day); x.setHours(0,0,0,0); return x; };
+const iso = dt => dt.toISOString().slice(0,10);
+
+async function load(){
+  const since = iso(new Date(mondayOf(new Date()).getTime() - 12*7*86400000));
+  const [repl, launches, weekly, summary, stores, sync, settings] = await Promise.all([
+    q("v_replenishment_formula?select=*&order=collection,top_name,colour"),
+    q("v_launch_summary?select=*&order=launch_date.desc"),
+    qAll(`v_weekly_style_colour?select=*&week_start=gte.${since}`),
+    qAll("v_style_colour_summary?select=*"),
+    qAll("v_store_style_colour?select=style_code,colour,location_name,units"),
+    q("sync_state?select=*"), q("settings?select=*"),
+  ]);
+  Object.assign(S, { repl, launches, weekly, summary, stores, sync });
+  settings.forEach(s => S.settings[s.key] = s.value);
+  renderFresh(); renderOverview(); renderRepl(); renderAttr(); renderProd(); renderSugg();
+}
+
+function renderFresh(){
+  const v = S.sync.find(s=>s.job==="vinculum_orders"), sh = S.sync.find(s=>s.job==="sheet_replenishment"), ss = S.sync.find(s=>s.job==="sheet_sales");
+  const rep = S.repl[0]?.report_date, stock = S.repl.find(r=>r.on_hand>0);
+  const ago = t => t ? `${Math.round((Date.now()-new Date(t))/60000)} min ago` : "never";
+  $("#fresh").innerHTML = `<span>Sales to <b>${d(rep)}</b></span><span>Orders sync <b>${v? (v.status==="ok"?ago(v.last_run):v.status) : "not yet"}</b></span><span>Sheet <b>${sh?ago(sh.last_run):"never"}</b></span>`;
+}
+
+// ---------- tiny chart helpers ----------
+const tip = $("#tip");
+function showTip(e, html){ tip.innerHTML = html; tip.style.display="block"; tip.style.left=(e.clientX+12)+"px"; tip.style.top=(e.clientY+12)+"px"; }
+function hideTip(){ tip.style.display="none"; }
+document.addEventListener("mousemove", e => { if(tip.style.display==="block"){ tip.style.left=(e.clientX+12)+"px"; tip.style.top=(e.clientY+12)+"px"; } });
+
+// grouped/stacked vertical bars: data=[{label, a, b}], two series online/store
+function barsSvg(data, {w=520,h=220,stack=true,labels=true,fmt=n0}={}){
+  if(!data.length) return `<div class="empty">No data</div>`;
+  const pl=36, pr=8, pt=10, pb=28, iw=w-pl-pr, ih=h-pt-pb;
+  const max = Math.max(1, ...data.map(r => stack ? (r.a||0)+(r.b||0) : Math.max(r.a||0,r.b||0)));
+  const bw = Math.min(42, iw/data.length*0.7), gap = iw/data.length;
+  const y = v => pt + ih - v/max*ih;
+  const ticks = [0, max/2, max];
+  let s = `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}">`;
+  ticks.forEach(t => s += `<line x1="${pl}" x2="${w-pr}" y1="${y(t)}" y2="${y(t)}" stroke="var(--line)"/><text x="${pl-6}" y="${y(t)+4}" text-anchor="end">${fmt(t)}</text>`);
+  data.forEach((r,i) => {
+    const x = pl + gap*i + (gap-bw)/2; const a=r.a||0, b=r.b||0;
+    const t = `${esc(r.label)}<br>Online ${fmt(a)} · Store ${fmt(b)} · Total ${fmt(a+b)}`;
+    if(stack){
+      s += `<rect x="${x}" y="${y(a)}" width="${bw}" height="${Math.max(0,ih-(y(a)-pt))}" fill="var(--online)" rx="2" data-t="${esc(t)}"/>`;
+      if(b>0) s += `<rect x="${x}" y="${y(a+b)-2}" width="${bw}" height="${Math.max(0,y(a)-y(a+b))}" fill="var(--store)" rx="2" data-t="${esc(t)}"/>`;
+    } else {
+      s += `<rect x="${x}" y="${y(a)}" width="${bw/2-1}" height="${ih-(y(a)-pt)}" fill="var(--online)" rx="2" data-t="${esc(t)}"/><rect x="${x+bw/2+1}" y="${y(b)}" width="${bw/2-1}" height="${ih-(y(b)-pt)}" fill="var(--store)" rx="2" data-t="${esc(t)}"/>`;
+    }
+    if(labels && (data.length<=14 || i%Math.ceil(data.length/14)===0)) s += `<text x="${x+bw/2}" y="${h-10}" text-anchor="middle">${esc(String(r.label).slice(0,14))}</text>`;
+  });
+  return s + `</svg>`;
+}
+// horizontal ranked bars: data=[{label, a, b}] (a=online,b=store)
+function hbarsSvg(data, {w=520, rowH=22, fmt=n0}={}){
+  if(!data.length) return `<div class="empty">No data</div>`;
+  const pl=150, pr=50, h = data.length*rowH+8, iw=w-pl-pr;
+  const max = Math.max(1, ...data.map(r=>(r.a||0)+(r.b||0)));
+  let s = `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}">`;
+  data.forEach((r,i) => { const y=4+i*rowH, a=r.a||0,b=r.b||0, wa=a/max*iw, wb=b/max*iw; const t=`${esc(r.label)}<br>Online ${fmt(a)} · Store ${fmt(b)}`;
+    s += `<text x="${pl-8}" y="${y+rowH/2+4}" text-anchor="end" style="fill:var(--fg)">${esc(String(r.label).slice(0,24))}</text>`;
+    s += `<rect x="${pl}" y="${y+4}" width="${wa}" height="${rowH-8}" fill="var(--online)" rx="2" data-t="${t}"/>`;
+    if(wb>0) s += `<rect x="${pl+wa+2}" y="${y+4}" width="${Math.max(0,wb-2)}" height="${rowH-8}" fill="var(--store)" rx="2" data-t="${t}"/>`;
+    s += `<text x="${pl+wa+wb+6}" y="${y+rowH/2+4}" class="num">${fmt(a+b)}</text>`; });
+  return s+`</svg>`;
+}
+function spark(vals, w=90, h=22){
+  if(!vals.length) return ""; const max=Math.max(1,...vals); const bw=w/vals.length;
+  return `<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${vals.map((v,i)=>`<rect x="${i*bw+1}" y="${h-v/max*h}" width="${Math.max(1,bw-2)}" height="${v/max*h}" fill="var(--online)" rx="1"/>`).join("")}</svg>`;
+}
+document.addEventListener("mouseover", e => { const t = e.target.getAttribute && e.target.getAttribute("data-t"); if(t) showTip(e, t); });
+document.addEventListener("mouseout", e => { if(e.target.getAttribute && e.target.getAttribute("data-t")) hideTip(); });
+
+// ---------- Overview ----------
+function trendChip(cur, prev){ if(!prev && !cur) return ""; const pct = prev ? Math.round((cur-prev)/prev*100) : null;
+  return pct==null ? `<span class="trend up">new</span>` : `<span class="trend ${pct>=0?"up":"down"}">${pct>=0?"▲":"▼"} ${Math.abs(pct)}%</span>`; }
+function renderOverview(){
+  const L = S.launches;
+  $("#ovNote").textContent = `${L.length} launches tracked in the replenishment sheet`;
+  $("#launchCards").innerHTML = L.map(l => `<div class="card">
+    <div class="t"><span>${esc(l.collection)}</span><span class="muted" style="font-weight:400">${d(l.launch_date)}</span></div>
+    <div class="hero num">${n0(l.total_sold)}<small>units sold</small></div>
+    <div class="kv">
+      <span>Last 7 days</span><b class="num">${n0(l.units_7d)} ${trendChip(l.units_7d,l.units_prev_7d)}</b>
+      <span>Online / store</span><b class="num">${l.total_sold?Math.round(l.online_units/l.total_sold*100):0}% / ${l.total_sold?Math.round(l.store_units/l.total_sold*100):0}%</b>
+      <span>On hand</span><b class="num">${n0(l.on_hand)}</b>
+      <span>Ordered + pipeline</span><b class="num">${n0(l.total_repl)} + ${n0(l.pipeline_qty)}</b>
+      <span>Still short</span><b class="num ${l.total_shortfall>0?"err":""}">${n0(l.total_shortfall)} <span class="muted">(${l.styles_short}/${l.style_colours} styles)</span></b>
+    </div></div>`).join("") || `<div class="empty">No replenishment rows yet — the sheet sync hasn't run.</div>`;
+  // weekly chart (all styles)
+  const wk = {}; S.weekly.forEach(r => { const k=r.week_start; wk[k] ??= {label:d(k), a:0,b:0}; if(r.channel==="Online") wk[k].a+=+r.units; else wk[k].b+=+r.units; });
+  $("#chWeekly").innerHTML = barsSvg(Object.keys(wk).sort().map(k=>wk[k]));
+  const mv = [...S.repl].filter(r=>r.units_7d>0).sort((a,b)=>b.units_7d-a.units_7d).slice(0,12);
+  $("#movers").innerHTML = `<table>${mv.map(r=>`<tr class="click" data-k="${esc(r.style_code)}|${esc(r.colour)}"><td><b>${esc(r.top_name)}</b> <span class="muted">${esc(title(r.colour))}</span></td><td class="r num">${n0(r.units_7d)}</td><td>${trendChip(r.units_7d,r.units_prev_7d)}</td><td>${covChip(r)}</td></tr>`).join("")}</table>`;
+  $("#movers").querySelectorAll("tr.click").forEach(tr => tr.onclick = () => openDrawer(tr.dataset.k));
+}
+function covChip(r){ return r.coverage==="Covered" ? `<span class="chip good">Covered</span>` : `<span class="chip bad">Short ${n0(r.shortfall)}</span>`; }
+function stageChip(s){ const c = s==="Delivered"?"good": s==="No replenishment"?"none": s==="Ordered"?"warn":"prod"; return `<span class="chip ${c}">${esc(s)}</span>`; }
+
+// ---------- Replenishment table ----------
+let rSort = {k:"shortfall", dir:-1};
+function fillSelect(sel, vals, keep){ const cur = sel.value; sel.innerHTML = `<option value="">${keep}</option>` + [...new Set(vals.filter(Boolean))].map(v=>`<option>${esc(v)}</option>`).join(""); sel.value = cur; }
+function renderRepl(){
+  fillSelect($("#rColl"), S.repl.map(r=>r.collection), "All launches");
+  fillSelect($("#rStage"), S.repl.map(r=>r.production_stage), "All stages");
+  const s = $("#rSearch").value.toLowerCase(), coll=$("#rColl").value, cov=$("#rCov").value, st=$("#rStage").value;
+  let rows = S.repl.filter(r => (!coll||r.collection===coll) && (!cov||r.coverage===cov) && (!st||r.production_stage===st) &&
+    (!s || `${r.top_name} ${r.colour} ${r.fabric} ${r.style_code} ${r.collection}`.toLowerCase().includes(s)));
+  rows.sort((a,b)=> { const x=a[rSort.k], y=b[rSort.k]; return (x==null?-1e9: typeof x==="string"? x.localeCompare(y): x-y) * rSort.dir; });
+  $("#rCount").textContent = `${rows.length} style-colours · ${n0(rows.reduce((t,r)=>t+Math.max(0,r.shortfall),0))} pcs short in total`;
+  const weeksOf = r => { const m={}; S.weekly.filter(w=>w.style_code===r.style_code&&w.colour===r.colour).forEach(w=>m[w.week_start]=(m[w.week_start]||0)+ +w.units); const ks=Object.keys(m).sort().slice(-8); return ks.map(k=>m[k]); };
+  const cols = [["top_name","Style"],["colour","Colour"],["collection","Launch"],["fabric","Fabric"],["_w","Last 8 wks"],["total_sold","Sold","r"],["units_7d","7d","r"],["units_per_day","/day","r"],
+    ["on_hand","On hand","r"],["pipeline_qty","Pipeline","r"],["total_repl","Ordered","r"],["formula_qty","Formula","r"],["after_repl_total","After repl.","r"],["shortfall","Shortfall","r"],["coverage","Status"],["production_stage","Stage"],["expected_delivery","Delivery"]];
+  $("#rTable").innerHTML = `<thead><tr><th></th>${cols.map(c=>`<th class="${c[2]||""}" data-k="${c[0]}">${c[1]}${rSort.k===c[0]?(rSort.dir>0?" ↑":" ↓"):""}</th>`).join("")}</tr></thead><tbody>` +
+    rows.map(r=>`<tr class="click" data-k="${esc(r.style_code)}|${esc(r.colour)}"><td>${r.image_url?`<img class="thumb" loading="lazy" src="${esc(r.image_url)}">`:`<div class="thumb"></div>`}</td>
+      <td><b>${esc(r.top_name)}</b><br><span class="muted num" style="font-size:11px">${esc(r.style_code)}</span></td><td>${esc(title(r.colour_label||r.colour))}</td><td>${esc(r.collection)}</td><td class="muted">${esc(r.fabric||"")}</td>
+      <td>${spark(weeksOf(r))}</td><td class="r num">${n0(r.total_sold)}</td><td class="r num">${n0(r.units_7d)} ${trendChip(r.units_7d,r.units_prev_7d)}</td><td class="r num">${n1(r.units_per_day)}</td>
+      <td class="r num">${n0(r.on_hand)}</td><td class="r num">${n0(r.pipeline_qty)}</td><td class="r num">${n0(r.total_repl)}</td><td class="r num"><b>${n0(r.formula_qty)}</b></td><td class="r num">${n0(r.after_repl_total)}</td>
+      <td class="r num ${r.shortfall>0?"err":""}">${r.shortfall>0?"+":""}${n0(r.shortfall)}</td><td>${covChip(r)}</td><td>${stageChip(r.production_stage)}</td><td>${d(r.expected_delivery)}</td></tr>`).join("") + `</tbody>`;
+  $("#rTable").querySelectorAll("th[data-k]").forEach(th => th.onclick = () => { const k=th.dataset.k; if(k==="_w") return; rSort = rSort.k===k ? {k, dir:-rSort.dir} : {k, dir:-1}; renderRepl(); });
+  $("#rTable").querySelectorAll("tr.click").forEach(tr => tr.onclick = () => openDrawer(tr.dataset.k));
+}
+["rSearch","rColl","rCov","rStage"].forEach(id => $("#"+id).addEventListener("input", renderRepl));
+
+// ---------- Drawer (style drill-down) ----------
+async function openDrawer(key){
+  const [style, colour] = key.split("|"); const r = S.repl.find(x=>x.style_code===style && x.colour===colour); if(!r) return;
+  $("#scrim").classList.add("on"); const D=$("#drawer"); D.classList.add("on");
+  D.innerHTML = `<div class="head">${r.image_url?`<img src="${esc(r.image_url)}">`:""}<div><h2 style="margin:0">${esc(r.top_name)} <span class="muted">${esc(title(r.colour_label||r.colour))}</span></h2>
+    <div class="muted">${esc(r.collection)} · ${esc(r.fabric||"")} · <span class="num">${esc(r.style_code)}</span></div>
+    <div class="row">${covChip(r)} ${stageChip(r.production_stage)} <span class="chip none">${n1(r.units_per_day)}/day over ${r.days_selling} days</span></div></div><button class="x" id="dx">Close</button></div>
+    <div class="loading muted" style="padding:20px">Loading…</div>`;
+  $("#dx").onclick = closeDrawer;
+  const [weekly, sizes, stock, daily] = await Promise.all([
+    q(`v_weekly_style_colour?style_code=eq.${encodeURIComponent(style)}&colour=eq.${encodeURIComponent(colour)}&order=week_start`),
+    q(`v_size_style_colour?style_code=eq.${encodeURIComponent(style)}&colour=eq.${encodeURIComponent(colour)}`),
+    q(`v_stock_sku?style_code=eq.${encodeURIComponent(style)}&colour=eq.${encodeURIComponent(colour)}&select=size,location_name,location_type,bin,qty`),
+    q(`v_daily_style_colour?style_code=eq.${encodeURIComponent(style)}&colour=eq.${encodeURIComponent(colour)}&order=sale_date`),
+  ]);
+  const wk={}; weekly.forEach(w=>{ wk[w.week_start] ??= {label:d(w.week_start),a:0,b:0}; if(w.channel==="Online") wk[w.week_start].a+=+w.units; else wk[w.week_start].b+=+w.units; });
+  const sz={}; const order=["XXS","XS","S","M","L","XL","XXL","2XL","3XL","4XL","5XL","6XL"]; sizes.forEach(s=>{ const k=s.size||"–"; sz[k] ??= {label:k,a:0,b:0}; if(s.channel==="Online") sz[k].a+=+s.units; else sz[k].b+=+s.units; });
+  const szRows = Object.values(sz).sort((a,b)=> (order.indexOf(a.label)+1||99)-(order.indexOf(b.label)+1||99));
+  const stores = S.stores.filter(s=>s.style_code===style&&s.colour===colour).sort((a,b)=>b.units-a.units).slice(0,12).map(s=>({label:s.location_name||"?",a:0,b:+s.units}));
+  const st={}; stock.forEach(x=>{ const k = x.location_type==="WH" ? (["INTRANSIT","VIRTUAL-PRODUCTION","VIR-STORE"].includes((x.bin||"").toUpperCase()) ? title(x.bin) : "Warehouse") : x.location_name; st[k] ??= {}; st[k][x.size||"–"]=(st[k][x.size||"–"]||0)+x.qty; });
+  const stSizes = [...new Set(stock.map(x=>x.size||"–"))].sort((a,b)=>(order.indexOf(a)+1||99)-(order.indexOf(b)+1||99));
+  const last14 = daily.slice(-14).reduce((t,x)=>t+ +x.units,0);
+  const steps = [["Ordered", r.total_repl>0, r.remark],["Fabric / Embroidery", !!r.emb_fabric_date, d(r.emb_fabric_date)],["Cutting / Stitching", !!r.cutting_date, d(r.cutting_date)],["Delivery", r.production_stage==="Delivered", d(r.expected_delivery)+(r.days_to_delivery!=null&&r.production_stage!=="Delivered"?` (${r.days_to_delivery}d)`:"")]];
+  D.querySelector(".loading").outerHTML = `
+    <div class="grid2" style="margin-top:12px">
+      <div class="card"><div class="t">Replenishment formula</div><div class="formula">
+        ${n0(r.total_sold)} sold ÷ ${r.days_selling} days = <b>${n1(r.units_per_day)}/day</b><br>× ${r.lead_days} day lead × ${r.buffer} buffer = <b>${n0(r.formula_qty)} needed</b><br>
+        on hand ${n0(r.on_hand)} (stores ${n0(r.store_on_hand)}, warehouse ${n0(r.wh_on_hand)}) + ordered ${n0(r.total_repl)} = ${n0(r.after_repl_total)}<br>
+        <b class="${r.shortfall>0?"err":""}">${r.shortfall>0?`Short by ${n0(r.shortfall)} pcs → make ${n0(r.shortfall)} more`:"Covered"}</b></div>
+        <div class="kv" style="margin-top:8px"><span>Pipeline</span><b class="num">${n0(r.intransit)} transit · ${n0(r.in_production)} production · ${n0(r.vir_store)} vir-store</b>
+        <span>Days of cover at current rate</span><b class="num">${r.days_of_cover==null?"–":n1(r.days_of_cover)+" days"}</b><span>Last 14 days</span><b class="num">${n0(last14)}</b>
+        <span>Online / store split</span><b class="num">${n0(r.online_units)} / ${n0(r.store_units)}</b><span>First sale</span><b>${d(r.first_sale)}</b></div></div>
+      <div class="card"><div class="t">Production</div><div class="timeline">${steps.map((s,i)=>`<div class="step ${s[1]?"done":""}"><b>${s[0]}</b><span>${esc(s[2]||"–")}</span></div>`).join("")}</div>
+        <div class="kv"><span>Replenishment orders</span><b class="num">${[r.repl_1,r.repl_2,r.repl_3].filter(Boolean).join(" + ")||"none"}</b><span>Days in production</span><b class="num">${r.days_in_production??"–"} <span class="muted">vs ${r.lead_days} lead</span></b>
+        <span>Paired</span><b>${esc(r.paired_bottom||"–")}${r.bottom_colour?` (${esc(r.bottom_colour)})`:""} · ${esc(r.paired_dupatta||"–")}${r.dupatta_colour?` (${esc(r.dupatta_colour)})`:""}</b></div>
+        ${r.remark?`<div class="muted" style="margin-top:6px">${esc(r.remark)}</div>`:""}</div>
+    </div>
+    <div class="grid2" style="margin-top:12px">
+      <div class="chart"><h3>Units per week</h3><div class="legend"><span><i style="background:var(--online)"></i>Online</span><span><i style="background:var(--store)"></i>Store</span></div>${barsSvg(Object.keys(wk).sort().map(k=>wk[k]),{h:200})}</div>
+      <div class="chart"><h3>Size curve</h3>${barsSvg(szRows,{h:200,stack:true})}</div>
+      <div class="chart"><h3>Top stores</h3>${hbarsSvg(stores)}</div>
+      <div class="chart"><h3>Where stock is sitting</h3><div class="tw"><table><thead><tr><th>Location</th>${stSizes.map(s=>`<th class="r">${esc(s)}</th>`).join("")}<th class="r">Total</th></tr></thead><tbody>
+        ${Object.entries(st).sort((a,b)=>Object.values(b[1]).reduce((x,y)=>x+y,0)-Object.values(a[1]).reduce((x,y)=>x+y,0)).map(([loc,m])=>`<tr><td>${esc(loc)}</td>${stSizes.map(s=>`<td class="r num">${m[s]||""}</td>`).join("")}<td class="r num"><b>${Object.values(m).reduce((x,y)=>x+y,0)}</b></td></tr>`).join("")||`<tr><td class="empty">No stock anywhere</td></tr>`}</tbody></table></div></div>
+    </div>`;
+}
+function closeDrawer(){ $("#drawer").classList.remove("on"); $("#scrim").classList.remove("on"); }
+$("#scrim").onclick = closeDrawer;
+
+// ---------- Attributes ----------
+function renderAttr(){
+  const dim=$("#aDim").value, weeks=+$("#aWeeks").value, chan=$("#aChan").value, cat=$("#aCat").value, s=$("#aSearch").value.toLowerCase();
+  const meta = {}; S.summary.forEach(x => meta[`${x.style_code}|${x.colour}`] = x);
+  fillSelect($("#aCat"), S.summary.map(x=>x.category), "All categories");
+  const since = iso(new Date(mondayOf(new Date()).getTime() - (weeks-1)*7*86400000));
+  const agg = {};
+  const add = (k, ch, u) => { if(!k) k="(none)"; agg[k] ??= {label:k,a:0,b:0}; if(ch==="Online") agg[k].a+=u; else agg[k].b+=u; };
+  if(dim==="location_name"){ S.stores.forEach(x => { const m=meta[`${x.style_code}|${x.colour}`]||{}; if(cat&&m.category!==cat) return; if(chan==="Online") return; add(x.location_name,"Store",+x.units); }); $("#aTitle").textContent="Units by store (all time)"; }
+  else if(dim==="size"){ $("#aTitle").textContent="Size curve — use a style's drill-down for per-style sizes"; S.summary.forEach(()=>{}); }
+  else {
+    const src = weeks>=52 ? S.summary.map(x=>({...x, _a:+x.online_units||0, _b:+x.store_units||0})) : null;
+    if(src){ src.forEach(x => { if(cat&&x.category!==cat) return; const v = dim==="colour"?title(x.colour):x[dim]; if(chan!=="Store") add(v,"Online",x._a); if(chan!=="Online") add(v,"Store",x._b); }); }
+    else S.weekly.filter(w=>w.week_start>=since && (!chan||w.channel===chan)).forEach(w => { const m=meta[`${w.style_code}|${w.colour}`]||{}; if(cat&&m.category!==cat) return;
+      const v = dim==="colour"?title(w.colour): dim==="product_name"?w.product_name: m[dim]; add(v, w.channel, +w.units); });
+    $("#aTitle").textContent = `Units by ${$("#aDim").selectedOptions[0].text.toLowerCase()} — ${$("#aWeeks").selectedOptions[0].text.toLowerCase()}`;
+  }
+  let rows = Object.values(agg).filter(r=>!s||r.label.toLowerCase().includes(s)).sort((x,y)=>(y.a+y.b)-(x.a+x.b));
+  const total = rows.reduce((t,r)=>t+r.a+r.b,0);
+  $("#chAttr").innerHTML = hbarsSvg(rows.slice(0,20));
+  $("#aTable").innerHTML = `<thead><tr><th>${esc($("#aDim").selectedOptions[0].text)}</th><th class="r">Units</th><th class="r">Share</th><th class="r">Online</th><th class="r">Store</th><th class="r">Online %</th></tr></thead><tbody>${rows.slice(0,200).map(r=>`<tr><td>${esc(r.label)}</td><td class="r num"><b>${n0(r.a+r.b)}</b></td><td class="r num">${total?Math.round((r.a+r.b)/total*100):0}%</td><td class="r num">${n0(r.a)}</td><td class="r num">${n0(r.b)}</td><td class="r num">${(r.a+r.b)?Math.round(r.a/(r.a+r.b)*100):0}%</td></tr>`).join("")}</tbody>`;
+}
+["aDim","aWeeks","aChan","aCat","aSearch"].forEach(id => $("#"+id).addEventListener("input", renderAttr));
+
+// ---------- Production ----------
+function renderProd(){
+  const all = S.repl.filter(r => r.total_repl>0 || r.in_production>0 || r.production_stage!=="No replenishment");
+  fillSelect($("#pColl"), all.map(r=>r.collection), "All launches"); fillSelect($("#pStage"), all.map(r=>r.production_stage), "All stages");
+  const coll=$("#pColl").value, st=$("#pStage").value;
+  const rows = all.filter(r=>(!coll||r.collection===coll)&&(!st||r.production_stage===st)).sort((a,b)=>(a.expected_delivery||"9")<(b.expected_delivery||"9")?-1:1);
+  const byStage = {}; all.forEach(r=>{ byStage[r.production_stage] ??= {n:0,q:0}; byStage[r.production_stage].n++; byStage[r.production_stage].q+=r.total_repl; });
+  const late = all.filter(r=>r.production_stage!=="Delivered" && r.days_to_delivery!=null && r.days_to_delivery<0);
+  const inProd = all.filter(r=>r.days_in_production!=null && r.production_stage!=="Delivered");
+  const avgDays = inProd.length ? inProd.reduce((t,r)=>t+r.days_in_production,0)/inProd.length : null;
+  $("#prodCards").innerHTML = Object.entries(byStage).map(([k,v])=>`<div class="card"><div class="t">${stageChip(k)}</div><div class="hero num">${v.n}<small>style-colours</small></div><div class="kv"><span>Pieces ordered</span><b class="num">${n0(v.q)}</b></div></div>`).join("") +
+    `<div class="card"><div class="t">Lead time</div><div class="hero num">${avgDays==null?"–":n1(avgDays)}<small>avg days in production</small></div><div class="kv"><span>Benchmark</span><b class="num">${S.settings.production_lead_days} days</b><span>Past expected delivery</span><b class="num ${late.length?"err":""}">${late.length}</b></div></div>`;
+  $("#pTable").innerHTML = `<thead><tr><th>Style</th><th>Colour</th><th>Launch</th><th class="r">Ordered</th><th class="r">In prod. (Vinculum)</th><th class="r">In transit</th><th>Stage</th><th>Fabric/Emb</th><th>Cutting</th><th>Expected</th><th class="r">Days in prod.</th><th class="r">Days to delivery</th><th>Remark</th></tr></thead><tbody>${
+    rows.map(r=>`<tr class="click" data-k="${esc(r.style_code)}|${esc(r.colour)}"><td><b>${esc(r.top_name)}</b></td><td>${esc(title(r.colour_label||r.colour))}</td><td>${esc(r.collection)}</td><td class="r num">${[r.repl_1,r.repl_2,r.repl_3].filter(Boolean).join("+")||0}</td><td class="r num">${n0(r.in_production)}</td><td class="r num">${n0(r.intransit)}</td><td>${stageChip(r.production_stage)}</td><td>${d(r.emb_fabric_date)}</td><td>${d(r.cutting_date)}</td><td>${d(r.expected_delivery)}</td><td class="r num">${r.days_in_production??"–"}</td><td class="r num ${r.days_to_delivery<0&&r.production_stage!=="Delivered"?"err":""}">${r.production_stage==="Delivered"?"✓":(r.days_to_delivery??"–")}</td><td class="muted" style="white-space:normal;max-width:260px">${esc(r.remark||"")}</td></tr>`).join("")}</tbody>`;
+  $("#pTable").querySelectorAll("tr.click").forEach(tr => tr.onclick = () => openDrawer(tr.dataset.k));
+}
+["pColl","pStage"].forEach(id => $("#"+id).addEventListener("input", renderProd));
+
+// ---------- Ask ----------
+const SUGG = ["Which styles are selling faster this week than last week?","Top 10 kurtas by units in the last 14 days, online vs store","Which colour is doing best across the Karwachauth launch?","Which stores sold the most Festive Drop 1 pieces?","What are we most short on after replenishment?","Which fabric sells best per day since launch?","Which sizes are running out for Yaira Kurta Fuschia?","How many days of cover does each replenished style have?"];
+const hist = [];
+function renderSugg(){ $("#sugg").innerHTML = SUGG.map(s=>`<button type="button">${esc(s)}</button>`).join(""); $("#sugg").querySelectorAll("button").forEach(b=>b.onclick=()=>{ $("#askIn").value=b.textContent; ask(); }); }
+$("#askForm").onsubmit = e => { e.preventDefault(); ask(); };
+async function ask(){
+  const question = $("#askIn").value.trim(); if(!question) return;
+  const box = document.createElement("div"); box.className="ans"; box.innerHTML = `<div class="q">${esc(question)}</div><div class="a muted">Thinking…</div>`;
+  $("#answers").prepend(box); $("#askIn").value="";
+  try {
+    const r = await fetch(ASK_URL, { method:"POST", headers:{ "Content-Type":"application/json", apikey:SUPABASE_KEY, Authorization:`Bearer ${SUPABASE_KEY}` }, body: JSON.stringify({ question, history: hist.slice(-4) }) });
+    const data = await r.json();
+    if(data.error){ box.innerHTML = `<div class="q">${esc(question)}</div><div class="a err">${esc(data.error)}</div>${data.sql?`<details><summary>SQL</summary><pre>${esc(data.sql)}</pre></details>`:""}`; return; }
+    hist.push({role:"user",content:question},{role:"assistant",content:`${data.title}: ${data.answer}`});
+    const rows = data.rows||[], cols = rows.length?Object.keys(rows[0]):[];
+    let chart = "";
+    if(data.chart && data.chart.type && data.chart.type!=="none" && rows.length>1 && data.chart.x && data.chart.y?.length){
+      const y0=data.chart.y[0], y1=data.chart.y[1]; const dd = rows.slice(0,30).map(r=>({label:String(r[data.chart.x]).slice(0,22), a:+r[y0]||0, b:y1?+r[y1]||0:0}));
+      chart = `<div class="chart" style="margin:8px 0"><h3>${esc(y1?`${y0} · ${y1}`:y0)} by ${esc(data.chart.x)}</h3>${data.chart.type==="line"||rows.length>12?barsSvg(dd,{h:200}):hbarsSvg(dd)}</div>`;
+    }
+    box.innerHTML = `<div class="q">${esc(question)}</div><div class="a">${esc(data.answer)}</div>${chart}
+      <div class="tw" style="max-height:360px"><table><thead><tr>${cols.map(c=>`<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${rows.map(r=>`<tr>${cols.map(c=>`<td class="${typeof r[c]==="number"?"r num":""}">${typeof r[c]==="number"?Number.isInteger(r[c])?n0(r[c]):n1(r[c]):esc(r[c]??"")}</td>`).join("")}</tr>`).join("")}</tbody></table></div>
+      <details><summary>${esc(data.title||"Query")} · ${rows.length} rows${data.note?` · ${esc(data.note)}`:""}</summary><pre>${esc(data.sql)}</pre></details>`;
+  } catch(e){ box.querySelector(".a").innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+}
+
+// ---------- tabs ----------
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => { document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("on",x===b)); document.querySelectorAll("main section").forEach(s=>s.classList.toggle("on",s.id===b.dataset.tab)); location.hash=b.dataset.tab; });
+if(location.hash){ const b=document.querySelector(`nav button[data-tab="${location.hash.slice(1)}"]`); b&&b.click(); }
+load().catch(e => { $("#launchCards").innerHTML = `<div class="empty err">${esc(e.message)}</div>`; });
+</script>
+</body>
+</html>

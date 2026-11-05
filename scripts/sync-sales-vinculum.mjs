@@ -35,8 +35,10 @@ const EXCLUDED_PREFIXES = ["M0", "MNW", "MWH", "NOO", "KAS", "PCPL", "KARTIK", "
 // ---------- Vinculum transport ----------
 let lastCall = 0;
 const MIN_GAP_MS = Number(process.env.VINCULUM_MIN_GAP_MS || 3000);
+const jsonStyle = new Set();  // endpoints that rejected the form body and want JSON
 async function vin(path, body, attempt = 1) {
   const json = JSON.stringify(body);
+  const asJson = jsonStyle.has(path);
   const wait = lastCall + MIN_GAP_MS - Date.now();
   if (wait > 0) await sleep(wait);
   lastCall = Date.now();
@@ -48,9 +50,10 @@ async function vin(path, body, attempt = 1) {
       headers: {
         ApiOwner: VINCULUM_API_OWNER, ApiKey: VINCULUM_API_KEY,
         OrgId: process.env.VINCULUM_ORG_ID || "MULM",
-        "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json",
+        ...(asJson ? { RequestBody: json } : {}),
+        "Content-Type": asJson ? "application/json" : "application/x-www-form-urlencoded", Accept: "application/json",
       },
-      body: new URLSearchParams({ RequestBody: json, ApiOwner: VINCULUM_API_OWNER, ApiKey: VINCULUM_API_KEY }).toString(),
+      body: asJson ? json : new URLSearchParams({ RequestBody: json, ApiOwner: VINCULUM_API_OWNER, ApiKey: VINCULUM_API_KEY }).toString(),
     });
   } catch (e) {
     if (attempt < 4) { log(`vinculum ${path} attempt ${attempt}: ${e.name} ${e.message}; retrying`); await sleep(5000 * attempt); return vin(path, body, attempt + 1); }
@@ -61,6 +64,7 @@ async function vin(path, body, attempt = 1) {
   try { data = JSON.parse(text); } catch {}
   const code = data ? Number(data.responseCode) : NaN;
   if (code === 1105) return { ...data, _empty: true };                      // "No Record Found"
+  if (code === 10058 && !asJson) { jsonStyle.add(path); log(`${path}: form body rejected (10058), retrying as JSON`); return vin(path, body, attempt); }
   if (code === 13) {                                                         // "API Hit Quota Exceeded"
     if (attempt > 8) throw new Error(`Vinculum ${path}: quota exceeded, gave up`);
     log(`quota hit on ${path}; waiting 65s (attempt ${attempt})`);
@@ -84,7 +88,7 @@ const fmtIST = d => `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYea
 function buildBody(from, to, page) {
   // Empty strings / arrays rather than missing keys: the API parse-errors on missing keys.
   return {
-    orderNo: "", statuses: [], fromDate: fmtIST(from), toDate: fmtIST(to), pageNumber: String(page),
+    orderNo: "", statuses: [], fromDate: fmtIST(from), toDate: fmtIST(to), pageNumber: page,
     order_Location: "", fulfillmentLocation: "", orderSource: "", paymentType: [], skuCodes: [], brand: [],
     IsReplacementOrder: "", reqType: "",
   };

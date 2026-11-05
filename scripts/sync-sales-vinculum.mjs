@@ -26,9 +26,9 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // ---------- business rules (identical to the August pipeline) ----------
 const SALE_STATUSES = new Set(["allocated", "confirmed", "delivered", "packed", "part allocated", "part picked",
-  "partial shipped", "partially shipped", "pick complete", "shipped complete"]);
+  "partial shipped", "partially shipped", "pick complete", "shipped complete", "pending"]);   // Pending counts as sold (team definition)
 const NON_SALE_STATUSES = new Set(["closed", "cancelled", "canceled", "shipped & returned", "shipped and returned",
-  "returned", "rto", "rto delivered", "return complete", "pending"]);
+  "returned", "rto", "rto delivered", "return complete"]);
 const ONLINE_CHANNELS = { M01: "INR", M03: "USD", M04: "AED", M10: "USD" };   // Shopify India / USA / UAE / Asia
 const EXCLUDED_PREFIXES = ["M0", "MNW", "MWH", "NOO", "KAS", "PCPL", "KARTIK", "ROHAN", "PO"];
 

@@ -96,7 +96,7 @@ function sheetDateTime(v) {
   return `${m[3]}-${pad(m[2])}-${pad(m[1])}T${pad(h)}:${m[5] || "00"}:${m[6] || "00"}+05:30`;
 }
 const SALE_STATUSES = new Set(["allocated", "confirmed", "delivered", "packed", "part allocated", "part picked",
-  "partial shipped", "partially shipped", "pick complete", "shipped complete"]);
+  "partial shipped", "partially shipped", "pick complete", "shipped complete", "pending"]);   // Pending counts as sold (team definition)
 
 // ---------- Replenishment sheet ----------
 async function syncReplenishment() {

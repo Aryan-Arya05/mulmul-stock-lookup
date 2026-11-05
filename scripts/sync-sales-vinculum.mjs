@@ -16,7 +16,7 @@ for (const k of ["VINCULUM_API_KEY", "VINCULUM_API_OWNER", "SUPABASE_URL", "SUPA
   if (!process.env[k]) { console.error(`Missing env ${k}`); process.exit(1); }
 
 const PROBE = process.env.PROBE === "1";
-const TAIL_DAYS = Number(process.env.TAIL_DAYS || 14);   // orderPull filters on order date; re-read 2 weeks so returns/cancellations update
+const TAIL_DAYS = Number(process.env.TAIL_DAYS || 3);   // orderPull filters on updatedDate, so late status changes resurface by themselves
 const PAGE_SIZE = 100;
 const MAX_PAGES_PER_WINDOW = 400;
 const WINDOW_DAYS = 7;

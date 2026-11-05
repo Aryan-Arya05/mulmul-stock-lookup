@@ -251,6 +251,7 @@ try {
   }
   if (backfillDays) log("backfill mode: no purge (base comes from load-base)");
   await sb(`sync_runs?id=eq.${run.id}`, { method: "PATCH", body: { status: "ok", finished_at: new Date().toISOString(), rows_upserted: invRows.length, error: skuWarn } });
+  await sb("rpc/refresh_sales_views", { method: "POST", body: {} }).catch(e => log("refresh_sales_views failed (non-fatal):", e.message));   // sales dashboard stock snapshot
   log("done");
 } catch (e) {
   log("FAILED", e.message);

@@ -263,7 +263,8 @@ try {
   }
   // Watermark = end of the window actually fetched (status-update time), not max order date.
   await setState({ status: "ok", watermark: to.toISOString(), last_run: new Date().toISOString(), detail: `wrote ${total} lines; window ${fmtIST(from)} -> ${fmtIST(to)}` });
-  log(`done: ${total} lines`);
+  await sb("rpc/refresh_sales_views", { method: "POST", body: {} });
+  log(`done: ${total} lines; views refreshed`);
 } catch (e) {
   log("FAILED", e.message);
   await setState({ status: "error", detail: e.message.slice(0, 800) }).catch(() => {});

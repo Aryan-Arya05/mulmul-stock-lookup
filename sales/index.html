@@ -195,13 +195,17 @@ const iso = dt => dt.toISOString().slice(0,10);
 
 async function load(){
   const since = iso(new Date(mondayOf(new Date()).getTime() - 12*7*86400000));
-  const [repl, launches, weekly, summary, stores, sync, settings] = await Promise.all([
+  const [repl, launches, sync, settings] = await Promise.all([
     q("v_replenishment_formula?select=*&order=collection,top_name,colour"),
     q("v_launch_summary?select=*&order=launch_date.desc"),
+    q("sync_state?select=*"), q("settings?select=*"),
+  ]);
+  Object.assign(S, { repl, launches, sync }); settings.forEach(s => S.settings[s.key] = s.value);
+  renderFresh(); renderOverview(); renderRepl(); renderProd();          // first paint from the light queries
+  const [weekly, summary, stores] = await Promise.all([
     qAll(`v_weekly_style_colour?select=*&week_start=gte.${since}`),
     qAll("v_style_colour_summary?select=*"),
     qAll("v_store_style_colour?select=style_code,colour,location_name,units"),
-    q("sync_state?select=*"), q("settings?select=*"),
   ]);
   Object.assign(S, { repl, launches, weekly, summary, stores, sync });
   settings.forEach(s => S.settings[s.key] = s.value);

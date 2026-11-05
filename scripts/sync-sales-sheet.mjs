@@ -168,6 +168,8 @@ try {
     const m = await syncSheetSales();
     await setState("sheet_sales", { status: "ok", last_run: new Date().toISOString(), detail: `${m} lines` });
   }
+  await sb("rpc/refresh_sales_views", { method: "POST", body: {} });
+  log("materialized views refreshed");
 } catch (e) {
   log("FAILED", e.message);
   await setState("sheet_replenishment", { status: "error", last_run: new Date().toISOString(), detail: e.message.slice(0, 800) }).catch(() => {});

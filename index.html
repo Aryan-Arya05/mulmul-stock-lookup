@@ -99,6 +99,8 @@ main{flex:1;padding:12px max(16px,env(safe-area-inset-right,0px)) calc(32px + en
 .cmpt .szs{display:inline-flex;gap:3px;flex-wrap:wrap;justify-content:center;max-width:120px}
 .cmpt .szs i{font-style:normal;font-size:11px;padding:1px 5px;border-radius:5px;background:var(--ok-bg);color:var(--ok);font-weight:600;white-space:nowrap}
 .cmpt .szs i b{font-weight:700;margin-left:3px;color:var(--fg)}
+.cmpt.pend .szs i{background:var(--prod-bg);color:var(--prod)}
+.cmpt.pend td.y{color:var(--prod)}
 .browse{display:flex;flex-direction:column;gap:10px}
 .browse .sel{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .browse select{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--fg);font-size:15px;appearance:auto}
@@ -448,10 +450,13 @@ async function showCompare(styles, colour, size) {
   // per location per style: qty (filtered) and set of sizes in stock (filtered by colour only)
   const loc = {};
   for (const s of stock) {
-    if (s.bucket !== "store" && s.bucket !== "warehouse") continue;
     const p = pBySku[s.sku]; if (!p) continue;
     if (colour && (p.colour || "—") !== colour) continue;
-    const L = loc[s.location_code] = loc[s.location_code] || { code: s.location_code, name: s.location_name, type: s.location_type, q: {}, sizes: {} };
+    // transit / production get their own pseudo-locations so they are visible, never mixed into availability
+    const key = s.bucket === "transit" ? "~transit" : s.bucket === "production" ? "~production" : s.location_code;
+    const nm = s.bucket === "transit" ? "In transit (dispatched from warehouse)" : s.bucket === "production" ? "In production" : s.location_name;
+    const ty = s.bucket === "transit" || s.bucket === "production" ? s.bucket : s.location_type;
+    const L = loc[key] = loc[key] || { code: key, name: nm, type: ty, q: {}, sizes: {} };
     if (!size || (p.size || "—") === size) L.q[s.style_code] = (L.q[s.style_code] || 0) + s.qty;
     const sz = L.sizes[s.style_code] = L.sizes[s.style_code] || {};
     sz[p.size || "—"] = (sz[p.size || "—"] || 0) + s.qty;
@@ -460,6 +465,7 @@ async function showCompare(styles, colour, size) {
     .filter(L => L.sum > 0)
     .sort((a,b) => (isMine(b.code)-isMine(a.code)) || (b.full-a.full) || (b.have-a.have) || b.sum-a.sum);
   const stores = rows.filter(l => l.type === "Store"), whs = rows.filter(l => l.type === "WH");
+  const pending = rows.filter(l => l.type === "transit" || l.type === "production");
   const fullStores = stores.filter(l => l.full);
 
   const head = `<tr><th>Store</th>${styles.map(st=>`<th>${esc(short(st))}</th>`).join("")}</tr>`;
@@ -468,7 +474,7 @@ async function showCompare(styles, colour, size) {
     const sz = sizesAll.filter(z => (L.sizes[st]?.[z] || 0) > 0);
     return `<td class="${sz.length ? "" : "n"}"><span class="szs">${sz.length ? sz.map(z=>`<i>${esc(z)}<b>${L.sizes[st][z]}</b></i>`).join("") : "✗"}</span></td>`;
   };
-  const table = list => list.length ? `<div class="matrix cmpt"><table><thead>${head}</thead><tbody>${list.map(L => `<tr class="${L.full?"full":""} ${isMine(L.code)?"mine":""}"><td>${esc(L.name)}${isMine(L.code)?"<small>yours</small>":""}${L.full?"<small class=fs>full set</small>":""}</td>${styles.map(st=>cell(L,st)).join("")}</tr>`).join("")}</tbody></table></div>` : `<div class="empty">None</div>`;
+  const table = (list, pend) => list.length ? `<div class="matrix cmpt ${pend?"pend":""}"><table><thead>${head}</thead><tbody>${list.map(L => `<tr class="${L.full && !pend?"full":""} ${isMine(L.code)?"mine":""}"><td>${esc(L.name)}${isMine(L.code)?"<small>yours</small>":""}${L.full && !pend?"<small class=fs>full set</small>":""}</td>${styles.map(st=>cell(L,st)).join("")}</tr>`).join("")}</tbody></table></div>` : `<div class="empty">None</div>`;
 
   const chip = (v, cur, kind, label) => `<button type="button" class="chip ${v===cur?"on":""}" data-cmp-${kind}="${esc(v ?? "")}">${esc(label ?? v)}</button>`;
   const what = (colour ? colour : "Any colour") + (size ? " · " + size : "");
@@ -481,6 +487,7 @@ async function showCompare(styles, colour, size) {
     <div class="sub" style="margin-top:4px">${size ? `<b>${fullStores.length}</b> store${fullStores.length===1?"":"s"} ha${fullStores.length===1?"s":"ve"} the full set in <b>${esc(what)}</b>` : `Showing which sizes each store has${colour ? ` in <b>${esc(colour)}</b>` : ""}. Pick a size to see exact quantities.`}</div>
     <div class="bucket"><h2>Stores</h2>${table(stores)}</div>
     <div class="bucket"><h2>Warehouse</h2>${table(whs)}</div>
+    ${pending.length ? `<div class="bucket"><h2>Not yet available</h2>${table(pending, true)}<div class="legend">Dispatched or still in production — not sellable today.</div></div>` : ""}
   </div>`;
   window.scrollTo(0,0);
 }

@@ -195,6 +195,11 @@ async function q(path){
   if(!r.ok) throw new Error(`${path}: ${r.status} ${await r.text()}`);
   return r.json();
 }
+async function rpc(name, args={}){
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${name}`, { method:"POST", headers:{ apikey:SUPABASE_KEY, Authorization:`Bearer ${SUPABASE_KEY}`, "Content-Type":"application/json" }, body: JSON.stringify(args) });
+  if(!r.ok) throw new Error(`${name}: ${r.status} ${await r.text()}`);
+  return r.json();
+}
 async function qAll(path, page=1000){ // page through PostgREST (server caps at 1000 rows per request)
   let out=[], from=0;
   for(;;){ const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { headers:{ apikey:SUPABASE_KEY, Authorization:`Bearer ${SUPABASE_KEY}`, Range:`${from}-${from+page-1}`, Prefer:"count=none" } });
@@ -215,13 +220,9 @@ async function load(){
   ]);
   Object.assign(S, { repl, launches, sync }); settings.forEach(s => S.settings[s.key] = s.value);
   renderFresh(); renderOverview(); renderRepl(); renderProd();          // first paint from the light queries
-  let weekly=[], summary=[], stores=[], stockAll=[];
-  try { [weekly, summary, stores, stockAll] = await Promise.all([
-    qAll(`v_weekly_style_colour?select=*&week_start=gte.${since}`),
-    qAll("v_style_colour_summary?select=*"),
-    qAll("v_store_style_colour?select=style_code,colour,location_name,units"),
-    qAll("v_stock_style_colour?select=style_code,colour,store_on_hand,wh_on_hand,intransit,in_production,vir_store"),
-  ]); S.stock = {}; stockAll.forEach(x => S.stock[`${x.style_code}|${x.colour}`] = x); } catch(e){ $("#prodTable").innerHTML = `<tbody><tr><td class="empty err">Could not load product history: ${esc(e.message)} — reload the page</td></tr></tbody>`; throw e; }
+  let weekly=[], summary=[], stores=[];
+  try { [weekly, summary] = await Promise.all([ rpc("dashboard_weekly", { since }), rpc("dashboard_products") ]);
+    S.stock = {}; summary.forEach(x => S.stock[`${x.style_code}|${x.colour}`] = x); } catch(e){ $("#prodTable").innerHTML = `<tbody><tr><td class="empty err">Could not load product history: ${esc(e.message)} — reload the page</td></tr></tbody>`; throw e; }
   Object.assign(S, { repl, launches, weekly, summary, stores, sync });
   settings.forEach(s => S.settings[s.key] = s.value);
   renderFresh(); renderOverview(); renderRepl(); renderAttr(); renderProd(); renderSugg();
@@ -364,6 +365,7 @@ async function openDrawer(key){
   const wk={}; weekly.forEach(w=>{ wk[w.week_start] ??= {label:d(w.week_start),a:0,b:0}; if(w.channel==="Online") wk[w.week_start].a+=+w.units; else wk[w.week_start].b+=+w.units; });
   const sz={}; const order=["XXS","XS","S","M","L","XL","XXL","2XL","3XL","4XL","5XL","6XL"]; sizes.forEach(s=>{ const k=s.size||"–"; sz[k] ??= {label:k,a:0,b:0}; if(s.channel==="Online") sz[k].a+=+s.units; else sz[k].b+=+s.units; });
   const szRows = Object.values(sz).sort((a,b)=> (order.indexOf(a.label)+1||99)-(order.indexOf(b.label)+1||99));
+  await S.storesReady;
   const stM = {}; S.stores.filter(s=>s.style_code===style&&s.colour===colour).forEach(s=>{ const k=s.location_name||"?"; stM[k]=(stM[k]||0)+ +s.units; });
   const stores = Object.entries(stM).sort((a,b)=>b[1]-a[1]).slice(0,12).map(([k,v])=>({label:k,a:0,b:v}));
   const st={}; stock.forEach(x=>{ const k = x.location_type==="WH" ? (["INTRANSIT","VIRTUAL-PRODUCTION","VIR-STORE"].includes((x.bin||"").toUpperCase()) ? title(x.bin) : "Warehouse") : x.location_name; st[k] ??= {}; st[k][x.size||"–"]=(st[k][x.size||"–"]||0)+x.qty; });
@@ -423,7 +425,7 @@ function renderAttr(){
   const since = iso(new Date(mondayOf(new Date()).getTime() - (weeks-1)*7*86400000));
   const agg = {};
   const add = (k, ch, u) => { if(!k) k="(none)"; agg[k] ??= {label:k,a:0,b:0}; if(ch==="Online") agg[k].a+=u; else agg[k].b+=u; };
-  if(dim==="location_name"){ S.stores.forEach(x => { const m=meta[`${x.style_code}|${x.colour}`]||{}; if(cat&&m.category!==cat) return; if(chan==="Online") return; add(x.location_name,"Store",+x.units); }); $("#aTitle").textContent="Units by store (all time)"; }
+  if(dim==="location_name"){ if(!S.stores.length){ S.storesReady?.then(renderAttr); } S.stores.forEach(x => { const m=meta[`${x.style_code}|${x.colour}`]||{}; if(cat&&m.category!==cat) return; if(chan==="Online") return; add(x.location_name,"Store",+x.units); }); $("#aTitle").textContent="Units by store (all time)"; }
   else if(dim==="size"){ $("#aTitle").textContent="Size curve — use a style's drill-down for per-style sizes"; S.summary.forEach(()=>{}); }
   else {
     const src = weeks>=52 ? S.summary.map(x=>({...x, _a:+x.online_units||0, _b:+x.store_units||0})) : null;

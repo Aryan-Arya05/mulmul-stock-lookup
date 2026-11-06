@@ -106,6 +106,7 @@ svg text{font-family:var(--sans);font-size:11px;fill:var(--muted)}
   <nav>
     <button data-tab="overview" class="on">Overview</button>
     <button data-tab="repl">Replenishment</button>
+    <button data-tab="products">Products</button>
     <button data-tab="attr">Attributes</button>
     <button data-tab="prod">Production</button>
     <button data-tab="ask">Ask</button>
@@ -132,6 +133,17 @@ svg text{font-family:var(--sans);font-size:11px;fill:var(--muted)}
       <span class="right muted" id="rCount"></span>
     </div>
     <div class="tw"><table id="rTable"></table></div>
+  </section>
+
+  <section id="products">
+    <h2>Product sale report <small>any style × colour, full history — click a row for the drill-down</small></h2>
+    <div class="filters">
+      <input type="search" id="pSearch" placeholder="Search style name, code or colour… e.g. Bairi, WW2601, fuschia" autofocus>
+      <select id="pCat"><option value="">All categories</option></select>
+      <select id="pSort"><option value="units">Most sold</option><option value="last_sale">Most recent</option><option value="first_sale">Newest launch</option><option value="orders">Most orders</option></select>
+      <span class="right muted" id="pCount"></span>
+    </div>
+    <div class="tw"><table id="prodTable"></table></div>
   </section>
 
   <section id="attr">
@@ -322,11 +334,18 @@ function renderRepl(){
 
 // ---------- Drawer (style drill-down) ----------
 async function openDrawer(key){
-  const [style, colour] = key.split("|"); const r = S.repl.find(x=>x.style_code===style && x.colour===colour); if(!r) return;
+  const [style, colour] = key.split("|"); let r = S.repl.find(x=>x.style_code===style && x.colour===colour);
+  if(!r){ const sm = S.summary.find(x=>x.style_code===style && x.colour===colour); if(!sm) return;
+    const days = sm.first_sale&&sm.last_sale ? Math.max(1,(new Date(sm.last_sale)-new Date(sm.first_sale))/86400000+1) : 1;
+    r = { ...sm, top_name: sm.product_name, colour_label: sm.colour, total_sold: +sm.units, days_selling: Math.round(days), units_per_day: +sm.units/days,
+          lead_days: +S.settings.production_lead_days||60, buffer: +S.settings.buffer_multiplier||1.5, _nonRepl: true,
+          formula_qty: Math.round(+sm.units/days*(+S.settings.production_lead_days||60)*(+S.settings.buffer_multiplier||1.5)),
+          on_hand: null, store_on_hand: null, wh_on_hand: null, total_repl: 0, after_repl_total: null, shortfall: null, coverage: null,
+          intransit: null, in_production: null, vir_store: null, production_stage: "No replenishment", repl_1:0, repl_2:0, repl_3:0 }; }
   $("#scrim").classList.add("on"); const D=$("#drawer"); D.classList.add("on");
   D.innerHTML = `<div class="head">${r.image_url?`<img src="${esc(r.image_url)}">`:""}<div><h2 style="margin:0">${esc(r.top_name)} <span class="muted">${esc(title(r.colour_label||r.colour))}</span></h2>
     <div class="muted">${esc(r.collection)} · ${esc(r.fabric||"")} · <span class="num">${esc(r.style_code)}</span></div>
-    <div class="row">${covChip(r)} ${stageChip(r.production_stage)} <span class="chip none">${n1(r.units_per_day)}/day over ${r.days_selling} days</span></div></div><button class="x" id="dx">Close</button></div>
+    <div class="row">${r._nonRepl ? `<span class="chip none">Not in replenishment sheet</span>` : covChip(r)+" "+stageChip(r.production_stage)} <span class="chip none">${n1(r.units_per_day)}/day over ${r.days_selling} days</span></div></div><button class="x" id="dx">Close</button></div>
     <div class="loading muted" style="padding:20px">Loading…</div>`;
   $("#dx").onclick = closeDrawer;
   const [weekly, sizes, stock, daily] = await Promise.all([
@@ -368,6 +387,22 @@ async function openDrawer(key){
 }
 function closeDrawer(){ $("#drawer").classList.remove("on"); $("#scrim").classList.remove("on"); }
 $("#scrim").onclick = closeDrawer;
+
+// ---------- Products (any style x colour) ----------
+function renderProducts(){
+  const q=$("#pSearch").value.toLowerCase().trim(), cat=$("#pCat").value, sort=$("#pSort").value;
+  fillSelect($("#pCat"), S.summary.map(x=>x.category), "All categories");
+  let rows = S.summary.filter(x => (!cat||x.category===cat) && (!q || `${x.product_name} ${x.style_code} ${x.colour} ${x.collection||""} ${x.segment||""}`.toLowerCase().includes(q)));
+  rows.sort((a,b)=> sort==="units"||sort==="orders" ? (+b[sort]||0)-(+a[sort]||0) : String(b[sort]||"").localeCompare(String(a[sort]||"")));
+  $("#pCount").textContent = `${rows.length.toLocaleString("en-IN")} style-colours`;
+  rows = rows.slice(0,300);
+  const stock = {}; S.repl.forEach(r=>stock[`${r.style_code}|${r.colour}`]=r);
+  $("#prodTable").innerHTML = `<thead><tr><th>Style</th><th>Colour</th><th>Category</th><th>Segment / launch</th><th class="r">Units</th><th class="r">Online</th><th class="r">Store</th><th class="r">Orders</th><th>First sale</th><th>Last sale</th><th class="r">Days selling</th><th class="r">/day</th></tr></thead><tbody>${
+    rows.map(x=>{ const days = x.first_sale&&x.last_sale ? Math.max(1,(new Date(x.last_sale)-new Date(x.first_sale))/86400000+1) : null;
+      return `<tr class="click" data-k="${esc(x.style_code)}|${esc(x.colour)}"><td><b>${esc(x.product_name||"")}</b><br><span class="muted num" style="font-size:11px">${esc(x.style_code)}</span></td><td>${esc(title(x.colour))}</td><td class="muted">${esc(x.category||"")}</td><td class="muted">${esc(x.collection||x.segment||"")}</td><td class="r num"><b>${n0(x.units)}</b></td><td class="r num">${n0(x.online_units)}</td><td class="r num">${n0(x.store_units)}</td><td class="r num">${n0(x.orders)}</td><td>${d(x.first_sale)}</td><td>${d(x.last_sale)}</td><td class="r num">${days?n0(days):"–"}</td><td class="r num">${days?n1(x.units/days):"–"}</td></tr>`; }).join("")}</tbody>`;
+  $("#prodTable").querySelectorAll("tr.click").forEach(tr => tr.onclick = () => openDrawer(tr.dataset.k));
+}
+["pSearch","pCat","pSort"].forEach(id => $("#"+id).addEventListener("input", renderProducts));
 
 // ---------- Attributes ----------
 function renderAttr(){

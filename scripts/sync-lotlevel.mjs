@@ -83,8 +83,9 @@ try {
 
   // Pass 2 — verify: the date-window pull omits lots that went to ZERO, so a SKU that sold out at a store never
   // updates. Ask explicitly for every SKU each store is believed to hold (sold-out ones come back "No Record Found").
-  const verifyLocs = (process.env.VERIFY_LOCS || "").split(",").map(x => x.trim()).filter(Boolean).length
-    ? process.env.VERIFY_LOCS.split(",").map(x => x.trim()).filter(Boolean) : locs;
+  // Verify is expensive (1 call per 100 held SKUs per store) and tripped Vinculum's hit quota; run it only for
+  // the stores named in VERIFY_LOCS (set by the daily rotation), never for all stores by default.
+  const verifyLocs = (process.env.VERIFY_LOCS || "").split(",").map(x => x.trim()).filter(Boolean);
   let verified = 0, zeroed = 0, vcalls = 0;
   for (const lc of verifyLocs) {
     const held = [];

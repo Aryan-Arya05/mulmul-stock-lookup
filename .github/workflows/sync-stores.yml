@@ -3,6 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       lookback_days: { description: "Days of movement to pull", default: "2" }
+      verify_locs: { description: "Comma-separated store codes to verify held SKUs for (blank = none)", default: "" }
 concurrency: { group: vinculum-sync, cancel-in-progress: false }
 jobs:
   sync:
@@ -19,3 +20,4 @@ jobs:
           SUPABASE_URL: https://idhtjxirqvaensqhozdc.supabase.co
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           LOOKBACK_DAYS: ${{ inputs.lookback_days || '2' }}
+          VERIFY_LOCS: ${{ inputs.verify_locs || '' }}

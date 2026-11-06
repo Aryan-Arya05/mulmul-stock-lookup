@@ -48,6 +48,7 @@ h2 small{color:var(--muted);font-weight:400;margin-left:8px}
 .filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0 12px}
 .filters select,.filters input{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 10px}
 .filters input[type=search]{min-width:220px}
+.btn{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 12px;font-weight:500}
 .chip{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:500;white-space:nowrap}
 .chip.good{background:var(--good-bg);color:var(--good)}.chip.bad{background:var(--bad-bg);color:var(--bad)}.chip.warn{background:var(--warn-bg);color:var(--warn)}.chip.none{background:var(--none-bg);color:var(--none)}
 .chip.prod{background:#efe8f8;color:#5b3a8c}.chip.transit{background:#e2f1f7;color:#0b6e8f}
@@ -131,6 +132,7 @@ svg text{font-family:var(--sans);font-size:11px;fill:var(--muted)}
       <select id="rCov"><option value="">Short + Covered</option><option>Short</option><option>Covered</option></select>
       <select id="rStage"><option value="">All stages</option></select>
       <span class="right muted" id="rCount"></span>
+      <button class="btn" id="rExport" type="button">Export CSV</button>
     </div>
     <div class="tw"><table id="rTable"></table></div>
   </section>
@@ -142,6 +144,7 @@ svg text{font-family:var(--sans);font-size:11px;fill:var(--muted)}
       <select id="pCat"><option value="">All categories</option></select>
       <select id="pSort"><option value="units">Most sold</option><option value="_stock">Most stock</option><option value="last_sale">Most recent</option><option value="first_sale">Newest launch</option><option value="orders">Most orders</option></select>
       <span class="right muted" id="pCount"></span>
+      <button class="btn" id="pExport" type="button">Export CSV</button>
     </div>
     <div class="tw"><table id="prodTable"><tbody><tr><td class="empty">Loading product history…</td></tr></tbody></table></div>
   </section>
@@ -157,6 +160,7 @@ svg text{font-family:var(--sans);font-size:11px;fill:var(--muted)}
       <select id="aChan"><option value="">Online + Store</option><option>Online</option><option>Store</option></select>
       <select id="aCat"><option value="">All categories</option></select>
       <input type="search" id="aSearch" placeholder="Filter…">
+      <button class="btn right" id="aExport" type="button">Export CSV</button>
     </div>
     <div class="grid2"><div class="chart"><h3 id="aTitle"></h3><div class="legend"><span><i style="background:var(--online)"></i>Online</span><span><i style="background:var(--store)"></i>Store</span></div><div id="chAttr"></div></div><div class="tw"><table id="aTable"></table></div></div>
   </section>
@@ -235,6 +239,13 @@ function renderFresh(){
   $("#fresh").innerHTML = `<span>Sales to <b>${d(rep)}</b></span><span>Orders sync <b>${v? (v.status==="ok"?ago(v.last_run):v.status) : "not yet"}</b></span><span>Sheet <b>${sh?ago(sh.last_run):"never"}</b></span>`;
 }
 
+// ---------- CSV export ----------
+function exportCsv(filename, cols, rows){
+  const esc_ = v => { v = v==null ? "" : String(v); return /[",\n]/.test(v) ? `"${v.replace(/"/g,'""')}"` : v; };
+  const csv = [cols.map(c=>esc_(c[1])).join(",")].concat(rows.map(r => cols.map(c => esc_(typeof c[0]==="function" ? c[0](r) : r[c[0]])).join(","))).join("\n");
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["\ufeff"+csv], {type:"text/csv;charset=utf-8"})); a.download = filename; a.click(); URL.revokeObjectURL(a.href);
+}
+const stamp = () => new Date().toISOString().slice(0,10);
 // ---------- tiny chart helpers ----------
 const tip = $("#tip");
 function showTip(e, html){ tip.innerHTML = html; tip.style.display="block"; tip.style.left=(e.clientX+12)+"px"; tip.style.top=(e.clientY+12)+"px"; }
@@ -320,6 +331,7 @@ function renderRepl(){
   let rows = S.repl.filter(r => (!coll||r.collection===coll) && (!cov||r.coverage===cov) && (!st||r.production_stage===st) &&
     (!s || `${r.top_name} ${r.colour} ${r.fabric} ${r.style_code} ${r.collection}`.toLowerCase().includes(s)));
   rows.sort((a,b)=> { const x=a[rSort.k], y=b[rSort.k]; return (x==null?-1e9: typeof x==="string"? x.localeCompare(y): x-y) * rSort.dir; });
+  S._replRows = rows;
   $("#rCount").textContent = `${rows.length} style-colours · ${n0(rows.reduce((t,r)=>t+Math.max(0,r.shortfall),0))} pcs short in total`;
   const weeksOf = r => { const m={}; S.weekly.filter(w=>w.style_code===r.style_code&&w.colour===r.colour).forEach(w=>m[w.week_start]=(m[w.week_start]||0)+ +w.units); const ks=Object.keys(m).sort().slice(-8); return ks.map(k=>m[k]); };
   const cols = [["top_name","Style"],["colour","Colour"],["collection","Launch"],["fabric","Fabric"],["_w","Last 8 wks"],["total_sold","Sold","r"],["units_7d","7d","r"],["units_per_day","/day","r"],
@@ -334,6 +346,7 @@ function renderRepl(){
   $("#rTable").querySelectorAll("tr.click").forEach(tr => tr.onclick = () => openDrawer(tr.dataset.k));
 }
 ["rSearch","rColl","rCov","rStage"].forEach(id => $("#"+id).addEventListener("input", renderRepl));
+$("#rExport").onclick = () => exportCsv(`mulmul-replenishment-${stamp()}.csv`, [["collection","Launch"],["top_name","Style"],["style_code","Style code"],["colour_label","Colour"],["fabric","Fabric"],["total_sold","Total sold"],["online_units","Online"],["store_units","Store"],["units_7d","Last 7d"],["units_prev_7d","Prev 7d"],["first_sale","First sale"],["days_selling","Days selling"],["units_per_day","Units/day"],["on_hand","On hand"],["store_on_hand","Stores"],["wh_on_hand","Warehouse"],["intransit","In transit"],["in_production","In production"],["vir_store","Vir-store"],["repl_1","Repl 1"],["repl_2","Repl 2"],["repl_3","Repl 3"],["total_repl","Total ordered"],["formula_qty","Formula"],["after_repl_total","After repl."],["shortfall","Shortfall"],["coverage","Status"],["production_stage","Stage"],["emb_fabric_date","Fabric/Emb date"],["cutting_date","Cutting date"],["expected_delivery","Expected delivery"],["remark","Remark"]], S._replRows||[]);
 
 // ---------- Drawer (style drill-down) ----------
 async function openDrawer(key){
@@ -407,6 +420,7 @@ function renderProducts(){
   const tot = rows.reduce((t,x)=>{ const st=(S.stock||{})[`${x.style_code}|${x.colour}`]||{}; t.u+=+x.units||0; t.oh+=(+st.store_on_hand||0)+(+st.wh_on_hand||0); t.p+=(+st.intransit||0)+(+st.in_production||0)+(+st.vir_store||0); return t; },{u:0,oh:0,p:0});
   $("#pCount").textContent = S.summary.length ? `${rows.length.toLocaleString("en-IN")} of ${S.summary.length.toLocaleString("en-IN")} style-colours${terms.length?` · ${n0(tot.u)} sold · ${n0(tot.oh)} on hand · ${n0(tot.p)} pipeline`:""}` : "loading…";
   if(!S.summary.length) return;
+  S._prodRows = rows;
   rows = rows.slice(0,300);
   const stock = {}; S.repl.forEach(r=>stock[`${r.style_code}|${r.colour}`]=r);
   $("#prodTable").innerHTML = `<thead><tr><th>Style</th><th>Colour</th><th>Category</th><th>Segment / launch</th><th class="r">Units</th><th class="r">Online</th><th class="r">Store</th><th class="r">Orders</th><th>First sale</th><th>Last sale</th><th class="r">/day</th><th class="r">On hand</th><th class="r">Stores / WH</th><th class="r">Pipeline</th></tr></thead><tbody>${
@@ -416,6 +430,10 @@ function renderProducts(){
   $("#prodTable").querySelectorAll("tr.click").forEach(tr => tr.onclick = () => openDrawer(tr.dataset.k));
 }
 ["pSearch","pCat","pSort"].forEach(id => $("#"+id).addEventListener("input", renderProducts));
+$("#pExport").onclick = () => { const st = x => (S.stock||{})[`${x.style_code}|${x.colour}`]||{};
+  exportCsv(`mulmul-products-${stamp()}.csv`, [["product_name","Style"],["style_code","Style code"],[x=>title(x.colour),"Colour"],["category","Category"],["segment","Segment"],["collection","Launch"],["fabric","Fabric"],
+    ["units","Units sold"],["online_units","Online"],["store_units","Store"],["orders","Orders"],["first_sale","First sale"],["last_sale","Last sale"],
+    [x=>(+st(x).store_on_hand||0)+(+st(x).wh_on_hand||0),"On hand"],[x=>+st(x).store_on_hand||0,"Stores on hand"],[x=>+st(x).wh_on_hand||0,"Warehouse on hand"],[x=>+st(x).intransit||0,"In transit"],[x=>+st(x).in_production||0,"In production"],[x=>+st(x).vir_store||0,"Vir-store"]], S._prodRows||[]); };
 
 // ---------- Attributes ----------
 function renderAttr(){
@@ -436,10 +454,12 @@ function renderAttr(){
   }
   let rows = Object.values(agg).filter(r=>!s||r.label.toLowerCase().includes(s)).sort((x,y)=>(y.a+y.b)-(x.a+x.b));
   const total = rows.reduce((t,r)=>t+r.a+r.b,0);
+  S._attrRows = rows.map(r=>({label:r.label, units:r.a+r.b, share: total?Math.round((r.a+r.b)/total*1000)/10:0, online:r.a, store:r.b}));
   $("#chAttr").innerHTML = hbarsSvg(rows.slice(0,20));
   $("#aTable").innerHTML = `<thead><tr><th>${esc($("#aDim").selectedOptions[0].text)}</th><th class="r">Units</th><th class="r">Share</th><th class="r">Online</th><th class="r">Store</th><th class="r">Online %</th></tr></thead><tbody>${rows.slice(0,200).map(r=>`<tr><td>${esc(r.label)}</td><td class="r num"><b>${n0(r.a+r.b)}</b></td><td class="r num">${total?Math.round((r.a+r.b)/total*100):0}%</td><td class="r num">${n0(r.a)}</td><td class="r num">${n0(r.b)}</td><td class="r num">${(r.a+r.b)?Math.round(r.a/(r.a+r.b)*100):0}%</td></tr>`).join("")}</tbody>`;
 }
 ["aDim","aWeeks","aChan","aCat","aSearch"].forEach(id => $("#"+id).addEventListener("input", renderAttr));
+$("#aExport").onclick = () => exportCsv(`mulmul-by-${$("#aDim").value}-${stamp()}.csv`, [["label",$("#aDim").selectedOptions[0].text],["units","Units"],["share","Share %"],["online","Online"],["store","Store"]], S._attrRows||[]);
 
 // ---------- Production ----------
 function renderProd(){

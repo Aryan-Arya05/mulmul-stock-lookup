@@ -14,9 +14,11 @@ async function call(loc, skus, days, page = "1") {
     signal: AbortSignal.timeout(120000) });
   const t = await r.text(); let d; try { d = JSON.parse(t); } catch { d = null; }
   const bins = {}; for (const x of (d?.response || [])) bins[x.binCode] = (bins[x.binCode] || 0) + 1;
-  return `${loc} skus=${skus.length ? skus.join("|") : "ALL"} days=${days||0} p${page}: http=${r.status} code=${d?.responseCode} msg=${d?.responseMessage} rows=${d?.response?.length ?? "-"} hasMore=${d?.hasMore} page=${d?.currentPage} bins=${JSON.stringify(bins).slice(0, 200)}`;
+  const hit = (d?.response || []).filter(x => SK.includes(String(x.skuCode).toUpperCase())).map(x => `${x.skuCode}@${x.location}:${x.qty}-${x.committedQty}/${x.binCode}/${x.lotNo}`);
+  return `HIT=[${hit.join(" ")}] ${loc} skus=${skus.length ? skus.join("|") : "ALL"} days=${days||0} p${page}: http=${r.status} code=${d?.responseCode} msg=${d?.responseMessage} rows=${d?.response?.length ?? "-"} hasMore=${d?.hasMore} page=${d?.currentPage} bins=${JSON.stringify(bins).slice(0, 200)}`;
 }
-for (const [loc, skus, days, page] of [["MCS", [], 1], ["MCS", [], 7], ["MCS", [], 7, "2"], ["MKM", [], 7], ["MWH", [], 1], ["", [], 1]]) {
+const SK = ["DD2607DEXS", "DDP2607DEXS"];
+for (const [loc, skus, days, page] of [["MKM", SK, 0], ["GGN", SK, 0], ["", SK, 0], ["MKM", [], 2], ["MKM", [], 7], ["MKM", [], 14]]) {
   try { out.push(await call(loc, skus, days, page)); } catch (e) { out.push(`${loc}: ERR ${e.message}`); }
   console.log(out[out.length - 1]);
   await new Promise(r => setTimeout(r, 1500));

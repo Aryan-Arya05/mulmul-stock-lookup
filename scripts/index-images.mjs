@@ -62,7 +62,11 @@ for (let off = 0; ; off += 10000) {
 }
 // existing index: product id -> image url (base, without ?v=) so a changed image is re-embedded
 const already = new Map();
-if (!process.env.REINDEX_ALL) for (const r of await sb("product_images?select=shopify_product_id,image_url&embedding=not.is.null&limit=100000")) already.set(r.shopify_product_id, (r.image_url || "").split("?")[0]);
+if (!process.env.REINDEX_ALL) for (let off = 0; ; off += 1000) {   // PostgREST caps at 1000 rows per request
+  const page = await sb(`product_images?select=shopify_product_id,image_url&embedding=not.is.null&order=shopify_product_id&offset=${off}&limit=1000`);
+  for (const r of page) already.set(r.shopify_product_id, (r.image_url || "").split("?")[0]);
+  if (page.length < 1000) break;
+}
 log(`known skus ${skuStyle.size}; already indexed products ${already.size}`);
 
 // 2. walk Shopify products

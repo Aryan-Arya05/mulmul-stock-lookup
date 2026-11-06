@@ -193,8 +193,13 @@ async function sb(path, { method = "GET", body, prefer } = {}) {
   return t ? JSON.parse(t) : null;
 }
 async function upsert(table, rows, onConflict) {
-  for (let i = 0; i < rows.length; i += 1000)
-    await sb(`${table}?on_conflict=${onConflict}`, { method: "POST", body: rows.slice(i, i + 1000), prefer: "resolution=merge-duplicates,return=minimal" });
+  for (let i = 0; i < rows.length; i += 400) {
+    const chunk = rows.slice(i, i + 400);
+    for (let attempt = 1; ; attempt++) {
+      try { await sb(`${table}?on_conflict=${onConflict}`, { method: "POST", body: chunk, prefer: "resolution=merge-duplicates,return=minimal" }); break; }
+      catch (e) { if (attempt >= 5 || !/57014|timeout|5\d\d/.test(e.message)) throw e; log(`upsert retry ${attempt}: ${e.message.slice(0, 80)}`); await sleep(5000 * attempt); }
+    }
+  }
 }
 async function setState(patch) {
   await sb("sync_state?on_conflict=job", { method: "POST", body: [{ job: "vinculum_orders", ...patch }], prefer: "resolution=merge-duplicates,return=minimal" });
@@ -259,11 +264,10 @@ if (process.env.BACKFILL === "1") {
   let empties = Number((st?.detail || "").match(/empties=(\d+)/)?.[1] || 0);
   const STOP_AT = process.env.BACKFILL_STOP_DATE ? parseDMY(process.env.BACKFILL_STOP_DATE) : null;   // history before this comes from the archive load
   if (STOP_AT && cursor <= STOP_AT) { await bset({ status: "done", last_run: new Date().toISOString(), detail: `complete: reached stop date ${fmtIST(STOP_AT).slice(0, 10)}` }); log("backfill reached stop date"); process.exit(0); }
-  let total = 0, windows = 0;
-  await bset({ status: "running", last_run: new Date().toISOString(), watermark: cursor.toISOString(), detail: `resuming at ${fmtIST(cursor)} empties=${empties}` });
-  try {
-    while (Date.now() - t0 < BUDGET_MS && empties < EMPTY_STOP && !(STOP_AT && cursor <= STOP_AT)) {
-      const we = new Date(cursor.getTime() - 1000), ws = new Date(cursor.getTime() - WINDOW_DAYS * 86400000);
+  let total = 0, windows = 0; const skipped = [];
+  // Pull all pages of [ws, we]; on a persistent Vinculum error split the window down to single days and skip only those.
+  async function fetchWindow(ws, we) {
+    try {
       const orders = [];
       for (let page = 1; page <= MAX_PAGES_PER_WINDOW; page++) {
         const payload = await vin(ENDPOINT, buildBody(ws, we, page));
@@ -273,16 +277,30 @@ if (process.env.BACKFILL === "1") {
         const totalPages = Number(payload.totalPages || 0);
         if (totalPages ? page >= totalPages : list.length < PAGE_SIZE) break;
       }
+      return orders;
+    } catch (e) {
+      const span = we.getTime() - ws.getTime();
+      if (span <= 86400000) { log(`  SKIP ${fmtIST(ws).slice(0, 10)}: ${e.message.slice(0, 120)}`); skipped.push(fmtIST(ws).slice(0, 10)); return []; }
+      const mid = new Date(ws.getTime() + Math.floor(span / 2 / 86400000) * 86400000 || ws.getTime() + span / 2);
+      log(`  window ${fmtIST(ws).slice(0, 10)}..${fmtIST(we).slice(0, 10)} failed (${e.message.slice(0, 60)}); splitting`);
+      return [...await fetchWindow(ws, new Date(mid.getTime() - 1000)), ...await fetchWindow(mid, we)];
+    }
+  }
+  await bset({ status: "running", last_run: new Date().toISOString(), watermark: cursor.toISOString(), detail: `resuming at ${fmtIST(cursor)} empties=${empties}` });
+  try {
+    while (Date.now() - t0 < BUDGET_MS && empties < EMPTY_STOP && !(STOP_AT && cursor <= STOP_AT)) {
+      const we = new Date(cursor.getTime() - 1000), ws = new Date(cursor.getTime() - WINDOW_DAYS * 86400000);
+      const orders = await fetchWindow(ws, we);
       const rows = flatten(orders);
       if (rows.length) await upsert("sale_lines", rows, "source,order_no,sku,line_key");
       empties = orders.length ? 0 : empties + 1;
       total += rows.length; windows++;
       cursor = ws;
       log(`  ${fmtIST(ws).slice(0, 10)}..${fmtIST(we).slice(0, 10)}: ${orders.length} orders, ${rows.length} lines`);
-      await bset({ watermark: cursor.toISOString(), detail: `reached ${fmtIST(cursor).slice(0, 10)}; this run ${total} lines over ${windows} windows; empties=${empties}` });
+      await bset({ watermark: cursor.toISOString(), detail: `reached ${fmtIST(cursor).slice(0, 10)}; this run ${total} lines over ${windows} windows; empties=${empties}${skipped.length ? `; skipped days: ${skipped.join(",")}` : ""}` });
     }
     const done = empties >= EMPTY_STOP || (STOP_AT && cursor <= STOP_AT);
-    await bset({ status: done ? "done" : "paused", last_run: new Date().toISOString(), watermark: cursor.toISOString(), detail: `${done ? "complete" : "budget reached"} at ${fmtIST(cursor).slice(0, 10)}; last run ${total} lines; empties=${empties}` });
+    await bset({ status: done ? "done" : "paused", last_run: new Date().toISOString(), watermark: cursor.toISOString(), detail: `${done ? "complete" : "budget reached"} at ${fmtIST(cursor).slice(0, 10)}; last run ${total} lines; empties=${empties}${skipped.length ? `; skipped days: ${skipped.join(",")}` : ""}` });
     await sb("rpc/refresh_sales_views", { method: "POST", body: {} }).catch(e => log("view refresh deferred to the DB cron (", e.message.slice(0, 80), ")"));
     log(done ? "BACKFILL COMPLETE" : "budget reached; will continue next run");
     process.exit(0);

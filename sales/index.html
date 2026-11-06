@@ -223,9 +223,9 @@ async function load(){
   let weekly=[], summary=[], stores=[];
   try { [weekly, summary] = await Promise.all([ rpc("dashboard_weekly", { since }), rpc("dashboard_products") ]);
     S.stock = {}; summary.forEach(x => S.stock[`${x.style_code}|${x.colour}`] = x); } catch(e){ $("#prodTable").innerHTML = `<tbody><tr><td class="empty err">Could not load product history: ${esc(e.message)} — reload the page</td></tr></tbody>`; throw e; }
-  Object.assign(S, { repl, launches, weekly, summary, stores, sync });
-  settings.forEach(s => S.settings[s.key] = s.value);
-  renderFresh(); renderOverview(); renderRepl(); renderAttr(); renderProd(); renderSugg();
+  Object.assign(S, { weekly, summary, stores });
+  renderOverview(); renderAttr(); renderProducts(); renderSugg();
+  S.storesReady = rpc("dashboard_stores").then(r => { S.stores = r; return r; });   // large; loaded after first paint
 }
 
 function renderFresh(){

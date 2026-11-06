@@ -81,6 +81,39 @@ try {
   if (failed.length === locs.length) throw new Error(`all locations failed: ${failed[0]}`);
   await progress(`lotlevel: fetched ${pages} pages, ${rawRows} rows, ${pairs.size} sku-locations; bins ${JSON.stringify(binsSeen).slice(0, 300)}`);
 
+  // Pass 2 — verify: the date-window pull omits lots that went to ZERO, so a SKU that sold out at a store never
+  // updates. Ask explicitly for every SKU each store is believed to hold (sold-out ones come back "No Record Found").
+  const verifyLocs = (process.env.VERIFY_LOCS || "").split(",").map(x => x.trim()).filter(Boolean).length
+    ? process.env.VERIFY_LOCS.split(",").map(x => x.trim()).filter(Boolean) : locs;
+  let verified = 0, zeroed = 0, vcalls = 0;
+  for (const lc of verifyLocs) {
+    const held = [];
+    for (let off = 0; ; off += 1000) {
+      const page = await sb(`inventory?select=sku&location_code=eq.${lc}&qty=gt.0&order=sku&offset=${off}&limit=1000`);
+      page.forEach(r => held.push(r.sku)); if (page.length < 1000) break;
+    }
+    const todo = held.filter(k => !pairs.has(`${k}|${lc}`));   // already refreshed this run → skip
+    for (let i = 0; i < todo.length; i += 100) {
+      const chunk = todo.slice(i, i + 100);
+      let d;
+      try { d = await vin({ skuCodes: chunk, buckets: ["good"], fromDate: "", toDate: "", pageNumber: "", locCode: lc, extLocCode: lc }); }
+      catch (e) { log(`verify ${lc} chunk ${i}: ${e.message}`); continue; }
+      vcalls++;
+      const seen = new Set();
+      for (const x of d.response || []) {
+        if (String(x.location || "").trim() !== lc) continue;
+        const bin = String(x.binCode || "").trim().toUpperCase(), sku = String(x.skuCode).trim().toUpperCase();
+        const qty = Math.max(0, Math.round(Number(x.qty || 0) - Number(x.committedQty || 0)));
+        seen.add(sku); pairs.add(`${sku}|${lc}`);
+        const k = `${sku}|${lc}|${bin}`; agg.set(k, (agg.get(k) || 0) + qty);
+      }
+      for (const sku of chunk) if (!seen.has(sku)) { pairs.add(`${sku}|${lc}`); zeroed++; }   // in pairs with no agg rows → deleted below
+      verified += chunk.length;
+    }
+    if (todo.length) await progress(`verify: ${lc} checked ${todo.length} held SKUs (${zeroed} sold out so far, ${vcalls} calls)`);
+  }
+  await progress(`verify done: ${verified} SKU-stores checked, ${zeroed} sold out, ${vcalls} calls`);
+
   // replace all rows for seen (sku, location) pairs: delete old bins, insert current
   const byLoc = new Map();
   for (const p of pairs) { const [sku, lc] = p.split("|"); if (!byLoc.has(lc)) byLoc.set(lc, []); byLoc.get(lc).push(sku); }
@@ -97,7 +130,7 @@ try {
   const stubs = skus.filter(s => !have.has(s)).map(sku => ({ sku, style_code: (/^([A-Z]+\d+)/.exec(sku) || [, sku])[1], updated_at: new Date(0).toISOString() }));
   if (stubs.length) await upsert("products", stubs, "sku");
 
-  await sb(`sync_runs?id=eq.${run.id}`, { method: "PATCH", body: { status: "ok", finished_at: new Date().toISOString(), rows_upserted: rows.length, progress: `lotlevel ok: ${rows.length} rows across ${byLoc.size} locations (${pairs.size} sku-locations, ${days}d lookback, ${pages} pages)${failed.length ? "; FAILED " + failed.join(" | ") : ""}` } });
+  await sb(`sync_runs?id=eq.${run.id}`, { method: "PATCH", body: { status: "ok", finished_at: new Date().toISOString(), rows_upserted: rows.length, progress: `lotlevel ok: ${rows.length} rows across ${byLoc.size} locations (${pairs.size} sku-locations, ${days}d lookback, ${pages} pages; verified ${verified}, ${zeroed} sold out)${failed.length ? "; FAILED " + failed.join(" | ") : ""}` } });
   log("done");
 } catch (e) {
   log("FAILED", e.message);

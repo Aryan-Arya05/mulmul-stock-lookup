@@ -240,7 +240,7 @@ async function load(){
   try { [weekly, summary] = await Promise.all([ rpc("dashboard_weekly", { since }), rpc("dashboard_products") ]);
     S.stock = {}; summary.forEach(x => S.stock[`${x.style_code}|${x.colour}`] = x); } catch(e){ $("#prodTable").innerHTML = `<tbody><tr><td class="empty err">Could not load product history: ${esc(e.message)} — reload the page</td></tr></tbody>`; throw e; }
   Object.assign(S, { weekly, summary, stores });
-  renderOverview(); renderAttr(); renderProducts(); renderSugg();
+  renderOverview(); renderAttr(); renderProducts(); renderSugg(); if(S.period) renderPeriod();
   S.storeTotals = null;   // Attributes "Store" view loads a small server-side aggregate on demand
 }
 

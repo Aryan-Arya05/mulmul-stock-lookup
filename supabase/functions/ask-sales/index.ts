@@ -62,6 +62,7 @@ v_replenishment_formula — THE replenishment report, one row per replenished st
 v_launch_summary — totals per collection/launch.
 settings — production_lead_days, buffer_multiplier. locations — store master (code, display_name, city, type).
 
+ALWAYS answer by calling the run_sql tool with one query — never reply in prose without calling it.
 Rules: one SELECT only, no CTE-less semicolons, max 200 rows (add LIMIT), ORDER BY something meaningful.
 Match names case-insensitively with ILIKE '%name%'. "This week" = current ISO week; "last week" = previous Monday-Sunday.
 When comparing styles, prefer rate metrics (units_per_day, units_7d) over raw totals when launch dates differ, and say so.
@@ -116,8 +117,12 @@ Deno.serve(async (req) => {
     const messages: unknown[] = [...history, { role: "user", content: question }];
 
     // 1) write SQL
-    let resp = await claude(messages, system, [TOOL], { type: "tool", name: "run_sql" });
+    let resp = await claude(messages, system, [TOOL], { type: "auto" });
     let call = resp.content.find((c: { type: string }) => c.type === "tool_use");
+    if (!call) {
+      const text = resp.content.filter((c: { type: string }) => c.type === "text").map((c: { text: string }) => c.text).join("\n");
+      return json({ title: "Answer", answer: text || "I could not turn that into a query — try rephrasing with a style, period or metric.", sql: null, rows: [], row_count: 0 });
+    }
     let input = call?.input ?? {};
     let rows: unknown[] = [];
     let error: string | null = null;
@@ -127,7 +132,7 @@ Deno.serve(async (req) => {
     if (error) {
       messages.push({ role: "assistant", content: resp.content });
       messages.push({ role: "user", content: [{ type: "tool_result", tool_use_id: call.id, content: `SQL error: ${error}. Fix the query.`, is_error: true }] });
-      resp = await claude(messages, system, [TOOL], { type: "tool", name: "run_sql" });
+      resp = await claude(messages, system, [TOOL], { type: "auto" });
       call = resp.content.find((c: { type: string }) => c.type === "tool_use");
       input = call?.input ?? input;
       error = null;

@@ -350,8 +350,9 @@ $("#rExport").onclick = () => exportCsv(`mulmul-replenishment-${stamp()}.csv`, [
 
 // ---------- Drawer (style drill-down) ----------
 async function openDrawer(key){
-  const [style, colour] = key.split("|"); let r = S.repl.find(x=>x.style_code===style && x.colour===colour);
-  if(!r){ const sm = S.summary.find(x=>x.style_code===style && x.colour===colour); if(!sm) return;
+  const [style, colour] = key.split("|"); const same = x => x.style_code===style && (x.colour||"")===colour;
+  let r = S.repl.find(same);
+  if(!r){ const sm = S.summary.find(same); if(!sm) return;
     const days = sm.first_sale&&sm.last_sale ? Math.max(1,(new Date(sm.last_sale)-new Date(sm.first_sale))/86400000+1) : 1;
     r = { ...sm, top_name: sm.product_name, colour_label: sm.colour, total_sold: +sm.units, days_selling: Math.round(days), units_per_day: +sm.units/days,
           lead_days: +S.settings.production_lead_days||60, buffer: +S.settings.buffer_multiplier||1.5, _nonRepl: true,
@@ -364,12 +365,13 @@ async function openDrawer(key){
     <div class="row">${r._nonRepl ? `<span class="chip none">Not in replenishment sheet</span>` : covChip(r)+" "+stageChip(r.production_stage)} <span class="chip none">${n1(r.units_per_day)}/day over ${r.days_selling} days</span></div></div><button class="x" id="dx">Close</button></div>
     <div class="loading muted" style="padding:20px">Loading…</div>`;
   $("#dx").onclick = closeDrawer;
+  const cf = colour ? `colour=eq.${encodeURIComponent(colour)}` : "colour=is.null";
   const [weekly, sizes, stock, daily, storeRows] = await Promise.all([
-    q(`v_weekly_style_colour?style_code=eq.${encodeURIComponent(style)}&colour=eq.${encodeURIComponent(colour)}&order=week_start`),
-    q(`v_size_style_colour?style_code=eq.${encodeURIComponent(style)}&colour=eq.${encodeURIComponent(colour)}`),
-    q(`v_stock_sku?style_code=eq.${encodeURIComponent(style)}&colour=eq.${encodeURIComponent(colour)}&select=size,location_name,location_type,bin,qty`),
-    q(`v_daily_style_colour?style_code=eq.${encodeURIComponent(style)}&colour=eq.${encodeURIComponent(colour)}&order=sale_date`),
-    q(`v_store_style_colour?style_code=eq.${encodeURIComponent(style)}&colour=eq.${encodeURIComponent(colour)}&select=location_name,units`),
+    q(`v_weekly_style_colour?style_code=eq.${encodeURIComponent(style)}&${cf}&order=week_start`),
+    q(`v_size_style_colour?style_code=eq.${encodeURIComponent(style)}&${cf}`),
+    q(`v_stock_sku?style_code=eq.${encodeURIComponent(style)}&${cf}&select=size,location_name,location_type,bin,qty`),
+    q(`v_daily_style_colour?style_code=eq.${encodeURIComponent(style)}&${cf}&order=sale_date`),
+    q(`v_store_style_colour?style_code=eq.${encodeURIComponent(style)}&${cf}&select=location_name,units`),
   ]);
   if(r._nonRepl){ // stock from the live inventory rows for products outside the replenishment sheet
     const pipe=["INTRANSIT","VIRTUAL-PRODUCTION","VIR-STORE"]; r.store_on_hand=0; r.wh_on_hand=0; r.intransit=0; r.in_production=0; r.vir_store=0;

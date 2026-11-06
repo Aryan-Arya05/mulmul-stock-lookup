@@ -158,6 +158,12 @@ svg text{font-family:var(--sans);font-size:11px;fill:var(--muted)}
       <span class="right muted" id="pCount"></span>
       <button class="btn" id="pExport" type="button">Export CSV</button>
     </div>
+    <div class="filters">
+      <select id="ppPreset"><option value="all">All time</option><option value="7">Last 7 days</option><option value="14">Last 14 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="tm">This month</option><option value="lm">Last month</option><option value="custom">Custom…</option></select>
+      <input type="date" id="ppFrom"><span class="muted">to</span><input type="date" id="ppTo">
+      <button class="btn" id="ppApply" type="button">Apply</button>
+      <span class="muted" id="ppNote"></span>
+    </div>
     <div class="tw"><table id="prodTable"><tbody><tr><td class="empty">Loading product history…</td></tr></tbody></table></div>
   </section>
 
@@ -466,23 +472,37 @@ function closeDrawer(){ $("#drawer").classList.remove("on"); $("#scrim").classLi
 $("#scrim").onclick = closeDrawer;
 
 // ---------- Products (any style x colour) ----------
+$("#ppPreset").onchange = () => { const v=$("#ppPreset").value; if(v==="all"){ $("#ppFrom").value=""; $("#ppTo").value=""; applyProdPeriod(); return; } if(v==="custom") return; const [a,b]=presetRange(v); $("#ppFrom").value=fmtD(a); $("#ppTo").value=fmtD(b); applyProdPeriod(); };
+$("#ppApply").onclick = applyProdPeriod;
+async function applyProdPeriod(){
+  const from=$("#ppFrom").value, to=$("#ppTo").value;
+  if(!from||!to){ S.prodPeriod=null; $("#ppNote").textContent=""; renderProducts(); return; }
+  $("#ppNote").textContent="Loading…";
+  const rows = await rpc("dashboard_period",{d_from:from,d_to:to});
+  const map={}; rows.forEach(r=>map[`${r.style_code}|${r.colour||""}`]=r);
+  S.prodPeriod = { from, to, days: Math.round((new Date(to)-new Date(from))/86400000)+1, map };
+  $("#ppNote").textContent = `${d(from)} – ${d(to)} · ${S.prodPeriod.days} days · only styles that sold in this period`;
+  renderProducts();
+}
 function renderProducts(){
   const terms=$("#pSearch").value.toLowerCase().split(/[-,|\/\n;]+/).map(t=>t.trim()).filter(Boolean), cat=$("#pCat").value, sort=$("#pSort").value;
   fillSelect($("#pCat"), S.summary.map(x=>x.category), "All categories");
   const rx = terms.length>1 ? terms.map(t => new RegExp(`(^|[^a-z0-9])${t.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")}([^a-z0-9]|$)`)) : null;   // list = whole-word match; single term = loose
-  let rows = S.summary.filter(x => { if(cat&&x.category!==cat) return false; if(!terms.length) return true; const h=`${x.product_name} ${x.style_code} ${x.colour} ${x.collection||""} ${x.segment||""}`.toLowerCase(); return rx ? rx.some(r=>r.test(h)) : h.includes(terms[0]); });
+  const PP = S.prodPeriod;
+  const base = PP ? S.summary.filter(x=>PP.map[`${x.style_code}|${x.colour||""}`]).map(x=>{ const p=PP.map[`${x.style_code}|${x.colour||""}`]; return {...x, units:+p.units, online_units:+p.online_units||0, store_units:+p.store_units||0, orders:null, _days:PP.days, _first:p.first_in_period, _last:p.last_in_period}; }) : S.summary;
+  let rows = base.filter(x => { if(cat&&x.category!==cat) return false; if(!terms.length) return true; const h=`${x.product_name} ${x.style_code} ${x.colour} ${x.collection||""} ${x.segment||""}`.toLowerCase(); return rx ? rx.some(r=>r.test(h)) : h.includes(terms[0]); });
   const oh = x => { const st=(S.stock||{})[`${x.style_code}|${x.colour}`]||{}; return (+st.store_on_hand||0)+(+st.wh_on_hand||0); };
   rows.sort((a,b)=> sort==="_stock" ? oh(b)-oh(a) : sort==="units"||sort==="orders" ? (+b[sort]||0)-(+a[sort]||0) : String(b[sort]||"").localeCompare(String(a[sort]||"")));
   const tot = rows.reduce((t,x)=>{ const st=(S.stock||{})[`${x.style_code}|${x.colour}`]||{}; t.u+=+x.units||0; t.oh+=(+st.store_on_hand||0)+(+st.wh_on_hand||0); t.p+=(+st.intransit||0)+(+st.in_production||0)+(+st.vir_store||0); return t; },{u:0,oh:0,p:0});
-  $("#pCount").textContent = S.summary.length ? `${rows.length.toLocaleString("en-IN")} of ${S.summary.length.toLocaleString("en-IN")} style-colours${terms.length?` · ${n0(tot.u)} sold · ${n0(tot.oh)} on hand · ${n0(tot.p)} pipeline`:""}` : "loading…";
+  $("#pCount").textContent = S.summary.length ? `${rows.length.toLocaleString("en-IN")} of ${base.length.toLocaleString("en-IN")} style-colours${terms.length?` · ${n0(tot.u)} sold · ${n0(tot.oh)} on hand · ${n0(tot.p)} pipeline`:""}` : "loading…";
   if(!S.summary.length) return;
   S._prodRows = rows;
   rows = rows.slice(0,300);
   const stock = {}; S.repl.forEach(r=>stock[`${r.style_code}|${r.colour}`]=r);
-  $("#prodTable").innerHTML = `<thead><tr><th>Style</th><th>Colour</th><th>Category</th><th>Segment / launch</th><th class="r">Units</th><th class="r">Online</th><th class="r">Store</th><th class="r">Orders</th><th>First sale</th><th>Last sale</th><th class="r">/day</th><th class="r">On hand</th><th class="r">Stores / WH</th><th class="r">Pipeline</th></tr></thead><tbody>${
-    rows.map(x=>{ const days = x.first_sale&&x.last_sale ? Math.max(1,(new Date(x.last_sale)-new Date(x.first_sale))/86400000+1) : null;
+  $("#prodTable").innerHTML = `<thead><tr><th>Style</th><th>Colour</th><th>Category</th><th>Segment / launch</th><th class="r">Units</th><th class="r">Online</th><th class="r">Store</th><th class="r">Orders</th><th>${PP?"First in period":"First sale"}</th><th>${PP?"Last in period":"Last sale"}</th><th class="r">/day</th><th class="r">On hand</th><th class="r">Stores / WH</th><th class="r">Pipeline</th></tr></thead><tbody>${
+    rows.map(x=>{ const days = x._days ? x._days : (x.first_sale&&x.last_sale ? Math.max(1,(new Date(x.last_sale)-new Date(x.first_sale))/86400000+1) : null);
       const st = (S.stock||{})[`${x.style_code}|${x.colour}`] || {}; const so=+st.store_on_hand||0, wh=+st.wh_on_hand||0, pipe=(+st.intransit||0)+(+st.in_production||0)+(+st.vir_store||0);
-      return `<tr class="click" data-k="${esc(x.style_code)}|${esc(x.colour)}"><td><b>${esc(x.product_name||"")}</b><br><span class="muted num" style="font-size:11px">${esc(x.style_code)}</span></td><td>${esc(title(x.colour))}</td><td class="muted">${esc(x.category||"")}</td><td class="muted">${esc(x.collection||x.segment||"")}</td><td class="r num"><b>${n0(x.units)}</b></td><td class="r num">${n0(x.online_units)}</td><td class="r num">${n0(x.store_units)}</td><td class="r num">${n0(x.orders)}</td><td>${d(x.first_sale)}</td><td>${d(x.last_sale)}</td><td class="r num">${days?n1(x.units/days):"–"}</td><td class="r num"><b class="${so+wh===0?"err":""}">${n0(so+wh)}</b></td><td class="r num muted">${n0(so)} / ${n0(wh)}</td><td class="r num">${pipe?n0(pipe):"–"}</td></tr>`; }).join("")}</tbody>`;
+      return `<tr class="click" data-k="${esc(x.style_code)}|${esc(x.colour)}"><td><b>${esc(x.product_name||"")}</b><br><span class="muted num" style="font-size:11px">${esc(x.style_code)}</span></td><td>${esc(title(x.colour))}</td><td class="muted">${esc(x.category||"")}</td><td class="muted">${esc(x.collection||x.segment||"")}</td><td class="r num"><b>${n0(x.units)}</b></td><td class="r num">${n0(x.online_units)}</td><td class="r num">${n0(x.store_units)}</td><td class="r num">${x.orders==null?"–":n0(x.orders)}</td><td>${d(x._first||x.first_sale)}</td><td>${d(x._last||x.last_sale)}</td><td class="r num">${days?n1(x.units/days):"–"}</td><td class="r num"><b class="${so+wh===0?"err":""}">${n0(so+wh)}</b></td><td class="r num muted">${n0(so)} / ${n0(wh)}</td><td class="r num">${pipe?n0(pipe):"–"}</td></tr>`; }).join("")}</tbody>`;
   $("#prodTable").querySelectorAll("tr.click").forEach(tr => tr.onclick = () => openDrawer(tr.dataset.k));
 }
 ["pSearch","pCat","pSort"].forEach(id => $("#"+id).addEventListener("input", renderProducts));

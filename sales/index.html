@@ -414,7 +414,8 @@ $("#scrim").onclick = closeDrawer;
 function renderProducts(){
   const terms=$("#pSearch").value.toLowerCase().split(/[-,|\/\n;]+/).map(t=>t.trim()).filter(Boolean), cat=$("#pCat").value, sort=$("#pSort").value;
   fillSelect($("#pCat"), S.summary.map(x=>x.category), "All categories");
-  let rows = S.summary.filter(x => { if(cat&&x.category!==cat) return false; if(!terms.length) return true; const h=`${x.product_name} ${x.style_code} ${x.colour} ${x.collection||""} ${x.segment||""}`.toLowerCase(); return terms.some(t=>h.includes(t)); });
+  const rx = terms.length>1 ? terms.map(t => new RegExp(`(^|[^a-z0-9])${t.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")}([^a-z0-9]|$)`)) : null;   // list = whole-word match; single term = loose
+  let rows = S.summary.filter(x => { if(cat&&x.category!==cat) return false; if(!terms.length) return true; const h=`${x.product_name} ${x.style_code} ${x.colour} ${x.collection||""} ${x.segment||""}`.toLowerCase(); return rx ? rx.some(r=>r.test(h)) : h.includes(terms[0]); });
   const oh = x => { const st=(S.stock||{})[`${x.style_code}|${x.colour}`]||{}; return (+st.store_on_hand||0)+(+st.wh_on_hand||0); };
   rows.sort((a,b)=> sort==="_stock" ? oh(b)-oh(a) : sort==="units"||sort==="orders" ? (+b[sort]||0)-(+a[sort]||0) : String(b[sort]||"").localeCompare(String(a[sort]||"")));
   const tot = rows.reduce((t,x)=>{ const st=(S.stock||{})[`${x.style_code}|${x.colour}`]||{}; t.u+=+x.units||0; t.oh+=(+st.store_on_hand||0)+(+st.wh_on_hand||0); t.p+=(+st.intransit||0)+(+st.in_production||0)+(+st.vir_store||0); return t; },{u:0,oh:0,p:0});

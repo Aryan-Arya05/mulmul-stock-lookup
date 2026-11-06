@@ -143,7 +143,7 @@ svg text{font-family:var(--sans);font-size:11px;fill:var(--muted)}
       <select id="pSort"><option value="units">Most sold</option><option value="last_sale">Most recent</option><option value="first_sale">Newest launch</option><option value="orders">Most orders</option></select>
       <span class="right muted" id="pCount"></span>
     </div>
-    <div class="tw"><table id="prodTable"></table></div>
+    <div class="tw"><table id="prodTable"><tbody><tr><td class="empty">Loading product history…</td></tr></tbody></table></div>
   </section>
 
   <section id="attr">
@@ -215,11 +215,12 @@ async function load(){
   ]);
   Object.assign(S, { repl, launches, sync }); settings.forEach(s => S.settings[s.key] = s.value);
   renderFresh(); renderOverview(); renderRepl(); renderProd();          // first paint from the light queries
-  const [weekly, summary, stores] = await Promise.all([
+  let weekly=[], summary=[], stores=[];
+  try { [weekly, summary, stores] = await Promise.all([
     qAll(`v_weekly_style_colour?select=*&week_start=gte.${since}`),
     qAll("v_style_colour_summary?select=*"),
     qAll("v_store_style_colour?select=style_code,colour,location_name,units"),
-  ]);
+  ]); } catch(e){ $("#prodTable").innerHTML = `<tbody><tr><td class="empty err">Could not load product history: ${esc(e.message)} — reload the page</td></tr></tbody>`; throw e; }
   Object.assign(S, { repl, launches, weekly, summary, stores, sync });
   settings.forEach(s => S.settings[s.key] = s.value);
   renderFresh(); renderOverview(); renderRepl(); renderAttr(); renderProd(); renderSugg();
@@ -399,7 +400,8 @@ function renderProducts(){
   fillSelect($("#pCat"), S.summary.map(x=>x.category), "All categories");
   let rows = S.summary.filter(x => (!cat||x.category===cat) && (!q || `${x.product_name} ${x.style_code} ${x.colour} ${x.collection||""} ${x.segment||""}`.toLowerCase().includes(q)));
   rows.sort((a,b)=> sort==="units"||sort==="orders" ? (+b[sort]||0)-(+a[sort]||0) : String(b[sort]||"").localeCompare(String(a[sort]||"")));
-  $("#pCount").textContent = `${rows.length.toLocaleString("en-IN")} style-colours`;
+  $("#pCount").textContent = S.summary.length ? `${rows.length.toLocaleString("en-IN")} of ${S.summary.length.toLocaleString("en-IN")} style-colours` : "loading…";
+  if(!S.summary.length) return;
   rows = rows.slice(0,300);
   const stock = {}; S.repl.forEach(r=>stock[`${r.style_code}|${r.colour}`]=r);
   $("#prodTable").innerHTML = `<thead><tr><th>Style</th><th>Colour</th><th>Category</th><th>Segment / launch</th><th class="r">Units</th><th class="r">Online</th><th class="r">Store</th><th class="r">Orders</th><th>First sale</th><th>Last sale</th><th class="r">Days selling</th><th class="r">/day</th></tr></thead><tbody>${

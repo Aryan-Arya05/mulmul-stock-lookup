@@ -72,6 +72,11 @@ async function vin(path, body, attempt = 1) {
     styleIdx++;
     return vin(path, body, attempt);
   }
+  if (code === 9 && attempt < 6) {                                           // "Generic Error" — transient on this tenant
+    log(`${path}: generic error (9); retrying in ${20 * attempt}s (attempt ${attempt})`);
+    await sleep(20000 * attempt);
+    return vin(path, body, attempt + 1);
+  }
   if (code === 13) {                                                         // "API Hit Quota Exceeded"
     if (attempt > 8) throw new Error(`Vinculum ${path}: quota exceeded, gave up`);
     log(`quota hit on ${path}; waiting 65s (attempt ${attempt})`);

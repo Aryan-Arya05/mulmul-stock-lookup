@@ -29,6 +29,7 @@ jobs:
           SUPABASE_URL: https://idhtjxirqvaensqhozdc.supabase.co
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       - name: Continue if history is not exhausted
+        if: always()
         env:
           GH_TOKEN: ${{ github.token }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -36,7 +37,7 @@ jobs:
           STATUS=$(curl -s "https://idhtjxirqvaensqhozdc.supabase.co/rest/v1/sync_state?job=eq.vinculum_backfill&select=status" \
             -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" | sed 's/.*"status":"\([a-z]*\)".*/\1/')
           echo "backfill status: $STATUS"
-          if [ "$STATUS" = "paused" ]; then
-            sleep 60
+          if [ "$STATUS" = "paused" ] || [ "$STATUS" = "error" ]; then
+            [ "$STATUS" = "error" ] && sleep 300 || sleep 60
             gh workflow run backfill-sales.yml -R ${{ github.repository }} -f budget_min=${{ inputs.budget_min || '300' }}
           fi

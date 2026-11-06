@@ -335,7 +335,7 @@ q.addEventListener("input", () => {
 });
 q.addEventListener("keydown", e => { if (e.key === "Enter") { clearTimeout(timer); const v = q.value.trim(); if (v) search(v, true); q.blur(); } });
 $("#clear").onclick = () => { q.value = ""; $("#searchBox").classList.remove("has"); home(); q.focus(); };
-function home(){ currentStyle = null; browseState = null; location.hash = ""; main.innerHTML = `<div class="hint"><b>Find any article in seconds</b>Type a style code like <code>SW2523</code>, a full SKU like <code>SW2523YS</code>, or a product name. Tap <strong>Photo</strong> to find a product from a picture, or <strong>Scan</strong> for the barcode on the tag.<br><br><button type="button" class="chip" id="browseBtn">Browse my stores by size / colour</button></div>`; $("#browseBtn").onclick = browse; }
+function home(){ currentStyle = null; browseState = null; location.hash = ""; main.innerHTML = `<div class="hint"><b>Find any article in seconds</b>Type a style code like <code>SW2523</code>, a full SKU like <code>SW2523YS</code>, or a product name. Tap <strong>Photo</strong> to find a product from a picture, or <strong>Scan</strong> for the barcode on the tag.<br><br><button type="button" class="chip" id="browseBtn">Browse stores by size / colour</button></div>`; $("#browseBtn").onclick = browse; }
 
 async function search(v, direct) {
   lastSearch = v; currentStyle = null; browseState = null; cmpState = null; compareMode = false; picked.clear();
@@ -486,30 +486,33 @@ async function showCompare(styles, colour, size) {
 /* ---------- browse a location by size / colour / category ---------- */
 let browseState = null;
 async function browse() {
-  if (!myStores.length) { openStoreModal(); return; }
-  browseState = browseState || { size: "", colour: "", category: "" };
+  browseState = browseState || { loc: myStores.length ? "MINE" : "ALL", size: "", colour: "", category: "" };
   currentStyle = null; lastSearch = ""; location.hash = "";
-  const names = myStores.map(c => (locations.find(x => x.code === c) || {}).display_name).filter(Boolean).join(", ");
+  const storeLocs = locations.filter(l => l.type === "Store").map(l => l.code);
+  const locs = browseState.loc === "ALL" ? storeLocs : browseState.loc === "MINE" ? (myStores.length ? myStores : storeLocs) : [browseState.loc];
+  const names = browseState.loc === "ALL" ? "all stores" : browseState.loc === "MINE" && myStores.length ? myStores.map(c => (locations.find(x => x.code === c) || {}).display_name).filter(Boolean).join(", ") : (locations.find(x => x.code === browseState.loc) || {}).display_name || "all stores";
   main.innerHTML = `<div class="browse"><div class="bar"><span class="n">Browsing ${esc(names)}</span></div><div class="spin">Loading…</div></div>`;
   let facets;
-  try { facets = await api("rpc/browse_facets", { method: "POST", body: JSON.stringify({ locs: myStores }) }); }
+  try { facets = await api("rpc/browse_facets", { method: "POST", body: JSON.stringify({ locs }) }); }
   catch (e) { main.innerHTML = `<div class="err">${esc(e.message)}</div>`; return; }
+  const locOpts = `<option value="ALL" ${browseState.loc==="ALL"?"selected":""}>All stores</option>` + (myStores.length ? `<option value="MINE" ${browseState.loc==="MINE"?"selected":""}>My stores (${myStores.length})</option>` : "") + locations.filter(l => l.type === "Store").map(l => `<option value="${l.code}" ${browseState.loc===l.code?"selected":""}>${esc(l.display_name)}</option>`).join("");
   const opts = (kind, cur, label) => `<option value="">${label}</option>` + facets.filter(f => f.kind === kind).sort((a,b) => kind === "size" ? sizeIdx(a.value)-sizeIdx(b.value) : b.n-a.n).map(f => `<option value="${esc(f.value)}" ${f.value===cur?"selected":""}>${esc(f.value)} (${f.n})</option>`).join("");
   main.innerHTML = `<div class="browse">
     <div class="bar"><span class="n">Browsing ${esc(names)}</span><button type="button" class="chip" id="browseClose">Close</button></div>
     <div class="sel">
+      <select id="bLoc" class="cat">${locOpts}</select>
       <select id="bSize">${opts("size", browseState.size, "Any size")}</select>
       <select id="bColour">${opts("colour", browseState.colour, "Any colour")}</select>
       <select id="bCat" class="cat">${opts("category", browseState.category, "Any category")}</select>
     </div>
-    <div id="bList"><div class="hint">Pick a size, colour or category to list what these stores have.</div></div>
+    <div id="bList"><div class="hint">Pick a size, colour or category to list what ${esc(names)} ha${browseState.loc!=="ALL" && locs.length===1 ? "s" : "ve"}.</div></div>
   </div>`;
   const run = async () => {
-    browseState = { size: $("#bSize").value, colour: $("#bColour").value, category: $("#bCat").value };
-    if (!browseState.size && !browseState.colour && !browseState.category) { $("#bList").innerHTML = `<div class="hint">Pick a size, colour or category to list what these stores have.</div>`; return; }
+    browseState = { loc: browseState.loc, size: $("#bSize").value, colour: $("#bColour").value, category: $("#bCat").value };
+    if (!browseState.size && !browseState.colour && !browseState.category) { $("#bList").innerHTML = `<div class="hint">Pick a size, colour or category to list what ${esc(names)} ha${locs.length===1 ? "s" : "ve"}.</div>`; return; }
     $("#bList").innerHTML = `<div class="spin">Loading…</div>`;
     try {
-      const rows = await api("rpc/browse_styles", { method: "POST", body: JSON.stringify({ locs: myStores, f_size: browseState.size || null, f_colour: browseState.colour || null, f_category: browseState.category || null, lim: 300 }) });
+      const rows = await api("rpc/browse_styles", { method: "POST", body: JSON.stringify({ locs, f_size: browseState.size || null, f_colour: browseState.colour || null, f_category: browseState.category || null, lim: 300 }) });
       if (!rows.length) { $("#bList").innerHTML = `<div class="hint"><b>Nothing matches</b>Try a different size or colour.</div>`; return; }
       const thumbs = await thumbsFor(rows.map(r => r.style_code));
       $("#bList").innerHTML = `<div class="bar"><span class="n">${rows.length} style${rows.length===1?"":"s"} · ${rows.reduce((a,r)=>a+Number(r.qty),0)} pcs</span></div><div class="results">` + rows.map(r => {
@@ -519,6 +522,7 @@ async function browse() {
     } catch (e) { $("#bList").innerHTML = `<div class="err">${esc(e.message)}</div>`; }
   };
   ["#bSize","#bColour","#bCat"].forEach(id => $(id).onchange = run);
+  $("#bLoc").onchange = () => { browseState = { ...browseState, loc: $("#bLoc").value, size: $("#bSize").value, colour: $("#bColour").value, category: $("#bCat").value }; browse(); };
   $("#browseClose").onclick = () => { browseState = null; home(); };
   if (browseState.size || browseState.colour || browseState.category) run();
 }

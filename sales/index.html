@@ -354,6 +354,11 @@ async function openDrawer(key){
     q(`v_stock_sku?style_code=eq.${encodeURIComponent(style)}&colour=eq.${encodeURIComponent(colour)}&select=size,location_name,location_type,bin,qty`),
     q(`v_daily_style_colour?style_code=eq.${encodeURIComponent(style)}&colour=eq.${encodeURIComponent(colour)}&order=sale_date`),
   ]);
+  if(r._nonRepl){ // stock from the live inventory rows for products outside the replenishment sheet
+    const pipe=["INTRANSIT","VIRTUAL-PRODUCTION","VIR-STORE"]; r.store_on_hand=0; r.wh_on_hand=0; r.intransit=0; r.in_production=0; r.vir_store=0;
+    stock.forEach(x=>{ const b=(x.bin||"").toUpperCase(); if(x.location_type==="WH"){ if(b==="INTRANSIT") r.intransit+=x.qty; else if(b==="VIRTUAL-PRODUCTION") r.in_production+=x.qty; else if(b==="VIR-STORE") r.vir_store+=x.qty; else r.wh_on_hand+=x.qty; } else r.store_on_hand+=x.qty; });
+    r.on_hand=r.store_on_hand+r.wh_on_hand; r.after_repl_total=r.on_hand; r.shortfall=r.formula_qty-r.on_hand;
+    const last7=daily.slice(-7).reduce((t,x)=>t+ +x.units,0); r.days_of_cover = last7>0 ? r.on_hand/(last7/7) : null; }
   const wk={}; weekly.forEach(w=>{ wk[w.week_start] ??= {label:d(w.week_start),a:0,b:0}; if(w.channel==="Online") wk[w.week_start].a+=+w.units; else wk[w.week_start].b+=+w.units; });
   const sz={}; const order=["XXS","XS","S","M","L","XL","XXL","2XL","3XL","4XL","5XL","6XL"]; sizes.forEach(s=>{ const k=s.size||"–"; sz[k] ??= {label:k,a:0,b:0}; if(s.channel==="Online") sz[k].a+=+s.units; else sz[k].b+=+s.units; });
   const szRows = Object.values(sz).sort((a,b)=> (order.indexOf(a.label)+1||99)-(order.indexOf(b.label)+1||99));
@@ -368,7 +373,7 @@ async function openDrawer(key){
       <div class="card"><div class="t">Replenishment formula</div><div class="formula">
         ${n0(r.total_sold)} sold ÷ ${r.days_selling} days = <b>${n1(r.units_per_day)}/day</b><br>× ${r.lead_days} day lead × ${r.buffer} buffer = <b>${n0(r.formula_qty)} needed</b><br>
         on hand ${n0(r.on_hand)} (stores ${n0(r.store_on_hand)}, warehouse ${n0(r.wh_on_hand)}) + ordered ${n0(r.total_repl)} = ${n0(r.after_repl_total)}<br>
-        <b class="${r.shortfall>0?"err":""}">${r._nonRepl ? "Not tracked in the replenishment sheet — formula shown for reference only" : r.shortfall>0?`Short by ${n0(r.shortfall)} pcs → make ${n0(r.shortfall)} more`:"Covered"}</b></div>
+        <b class="${r.shortfall>0?"err":""}">${r._nonRepl ? `Not in the replenishment sheet — at the historical rate the formula would call for ${n0(r.formula_qty)} vs ${n0(r.on_hand)} on hand` : r.shortfall>0?`Short by ${n0(r.shortfall)} pcs → make ${n0(r.shortfall)} more`:"Covered"}</b></div>
         <div class="kv" style="margin-top:8px"><span>Pipeline</span><b class="num">${n0(r.intransit)} transit · ${n0(r.in_production)} production · ${n0(r.vir_store)} vir-store</b>
         <span>Days of cover at current rate</span><b class="num">${r.days_of_cover==null?"–":n1(r.days_of_cover)+" days"}</b><span>Last 14 days</span><b class="num">${n0(last14)}</b>
         <span>Online / store split</span><b class="num">${n0(r.online_units)} / ${n0(r.store_units)}</b><span>First sale</span><b>${d(r.first_sale)}</b></div></div>

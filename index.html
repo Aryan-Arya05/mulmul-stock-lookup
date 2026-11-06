@@ -71,6 +71,30 @@ main{flex:1;padding:12px max(16px,env(safe-area-inset-right,0px)) calc(32px + en
 .hint code{font-family:var(--mono);font-size:13px;background:var(--card);border:1px solid var(--line);padding:1px 6px;border-radius:6px}
 
 .results{display:flex;flex-direction:column;gap:8px}
+.bar{display:flex;gap:8px;align-items:center;justify-content:space-between;margin:0 0 10px;flex-wrap:wrap}
+.bar .n{font-size:13px;color:var(--muted)}
+.bar .chip.on{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.row.pick{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.row .box{width:22px;height:22px;border:2px solid var(--line);border-radius:6px;flex:none;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--accent-fg)}
+.row.pick .box{background:var(--accent);border-color:var(--accent)}
+.cmpbar{position:sticky;bottom:calc(12px + env(safe-area-inset-bottom,0px));display:flex;justify-content:center;margin-top:12px;pointer-events:none}
+.cmpbar button{pointer-events:auto;border:0;background:var(--accent);color:var(--accent-fg);border-radius:999px;padding:12px 22px;font-weight:600;box-shadow:0 6px 20px rgba(0,0,0,.25)}
+.cmp h1{font-size:18px;font-weight:600;margin:0 0 2px;text-wrap:balance}
+.cmp .sub{font-size:13px;color:var(--muted);margin-bottom:12px}
+.cmp .piece{margin:0 0 12px}
+.cmp .piece h3{font-size:14px;font-weight:600;margin:0 0 6px;display:flex;justify-content:space-between}
+.cmp .piece h3 span{color:var(--muted);font-weight:400;font-size:12px}
+.cmp table th:first-child,.cmp table td:first-child{min-width:90px}
+.cmp .loc .q{font-weight:500;font-variant-numeric:tabular-nums;white-space:nowrap}
+.cmp .loc .q b{font-weight:600}
+.cmp .loc .q i{font-style:normal;color:var(--muted);margin:0 4px}
+.cmp .loc.full{background:var(--ok-bg)}
+.browse{display:flex;flex-direction:column;gap:10px}
+.browse .sel{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.browse select{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--fg);font-size:15px;appearance:auto}
+.browse select.cat{grid-column:1 / -1}
+.browse .hint{padding:24px 12px}
+.row .meta{display:block;color:var(--muted);font-size:12px;margin-top:2px;white-space:normal}
 .row{display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;text-align:left;width:100%}
 .row .name{font-weight:500;flex:1;min-width:0}
 .row .name small{display:block;color:var(--muted);font-family:var(--mono);font-size:12px;margin-top:2px}
@@ -249,7 +273,7 @@ async function boot() {
   if (!myStores.length) openStoreModal();
   freshness();
   const h = decodeURIComponent(location.hash.slice(1));
-  if (h) lookupSku(h);
+  if (h) lookupSku(h); else home();
 }
 const ago = iso => { if (!iso) return null; const m = Math.round((Date.now() - new Date(iso)) / 60000); return m < 2 ? "just now" : m < 60 ? `${m} min ago` : m < 36*60 ? `${Math.round(m/60)} h ago` : `${Math.round(m/1440)} d ago`; };
 async function freshness() {
@@ -286,6 +310,7 @@ function saveStores() {
   try { localStorage.setItem("mulmul.stores", myStores.join(",")); } catch {}
   renderStoreBtn(); $("#storeModal").classList.remove("open");
   if (currentStyle) showStyle(currentStyle.style_code, currentStyle.sku, currentStyle.colour);
+  else if (browseState) browse();
 }
 $("#storeDone").onclick = saveStores;
 $("#storeClear").onclick = () => { myStores = []; onlyMine = false; buildStoreList(); };
@@ -301,10 +326,10 @@ q.addEventListener("input", () => {
 });
 q.addEventListener("keydown", e => { if (e.key === "Enter") { clearTimeout(timer); const v = q.value.trim(); if (v) search(v, true); q.blur(); } });
 $("#clear").onclick = () => { q.value = ""; $("#searchBox").classList.remove("has"); home(); q.focus(); };
-function home(){ currentStyle = null; location.hash = ""; main.innerHTML = `<div class="hint"><b>Find any article in seconds</b>Type a style code like <code>SW2523</code>, a full SKU like <code>SW2523YS</code>, or a product name. Tap <strong>Photo</strong> to find a product from a picture, or <strong>Scan</strong> for the barcode on the tag.</div>`; }
+function home(){ currentStyle = null; browseState = null; location.hash = ""; main.innerHTML = `<div class="hint"><b>Find any article in seconds</b>Type a style code like <code>SW2523</code>, a full SKU like <code>SW2523YS</code>, or a product name. Tap <strong>Photo</strong> to find a product from a picture, or <strong>Scan</strong> for the barcode on the tag.<br><br><button type="button" class="chip" id="browseBtn">Browse my stores by size / colour</button></div>`; $("#browseBtn").onclick = browse; }
 
 async function search(v, direct) {
-  lastSearch = v; currentStyle = null;
+  lastSearch = v; currentStyle = null; browseState = null; compareMode = false; picked.clear();
   main.innerHTML = `<div class="spin">Searching…</div>`;
   try {
     const rows = await api("rpc/search_styles", { method: "POST", body: JSON.stringify({ q: v, lim: 25 }) });
@@ -313,16 +338,27 @@ async function search(v, direct) {
     if (direct && rows.length === 1) return showStyle(rows[0].style_code, /^[A-Z0-9]{8,}$/i.test(v) ? v.toUpperCase() : null);
     const thumbs = await thumbsFor(rows.map(r => r.style_code));
     if (lastSearch !== v) return;
-    main.innerHTML = `<div class="results">` + rows.map(r => {
-      const c = r.total_qty > 5 ? "ok" : r.total_qty > 0 ? "low" : "zero";
-      const th = thumbs[r.style_code];
-      return `<button type="button" class="row" data-style="${esc(r.style_code)}">${th ? `<img class="thumb" src="${esc(th)}" alt="" loading="lazy">` : ""}<div class="name">${esc(r.product_name||"—")}<small>${esc(r.style_code)} · ${r.variants} variant${r.variants==1?"":"s"}</small></div><span class="qty ${c}">${r.total_qty} pcs</span></button>`;
-    }).join("") + `</div>`;
+    lastRows = rows; lastThumbs = thumbs;
+    renderResults();
   } catch (e) { main.innerHTML = `<div class="err">Search failed. ${esc(e.message)}</div>`; }
 }
+let lastRows = [], lastThumbs = {}, compareMode = false, picked = new Set();
+function renderResults() {
+  const rows = lastRows, thumbs = lastThumbs;
+  main.innerHTML = `<div class="bar"><span class="n">${rows.length} result${rows.length===1?"":"s"}</span><button type="button" class="chip ${compareMode?"on":""}" id="cmpToggle">${compareMode ? "Cancel compare" : "Compare / set"}</button></div><div class="results">` + rows.map(r => {
+      const c = r.total_qty > 5 ? "ok" : r.total_qty > 0 ? "low" : "zero";
+      const th = thumbs[r.style_code]; const on = picked.has(r.style_code);
+      return `<button type="button" class="row ${compareMode && on ? "pick" : ""}" data-style="${esc(r.style_code)}">${compareMode ? `<span class="box">${on ? "✓" : ""}</span>` : ""}${th ? `<img class="thumb" src="${esc(th)}" alt="" loading="lazy">` : ""}<div class="name">${esc(r.product_name||"—")}<small>${esc(r.style_code)} · ${r.variants} variant${r.variants==1?"":"s"}</small></div><span class="qty ${c}">${r.total_qty} pcs</span></button>`;
+    }).join("") + `</div>` + (compareMode ? `<div class="cmpbar"><button type="button" id="cmpGo" ${picked.size < 2 ? "disabled" : ""}>Compare ${picked.size || ""} ${picked.size === 1 ? "(pick one more)" : picked.size ? "together" : "— tick 2 or more"}</button></div>` : "");
+}
 main.addEventListener("click", e => {
-  const r = e.target.closest(".row[data-style]"); if (r) return showStyle(r.dataset.style, null);
-  if (e.target.closest(".back")) { if (lastSearch) search(lastSearch); else home(); }
+  if (e.target.closest("#cmpToggle")) { compareMode = !compareMode; if (!compareMode) picked.clear(); return renderResults(); }
+  if (e.target.closest("#cmpGo")) return showCompare([...picked]);
+  const r = e.target.closest(".row[data-style]");
+  if (r && compareMode) { const c = r.dataset.style; picked.has(c) ? picked.delete(c) : picked.add(c); return renderResults(); }
+  if (r) return showStyle(r.dataset.style, null);
+  const bf = e.target.closest(".browse-row[data-style]"); if (bf) return showStyle(bf.dataset.style, null);
+  if (e.target.closest(".back")) { if (browseState) return browse(); if (lastSearch) search(lastSearch); else home(); }
   const ch = e.target.closest(".chip[data-sku]"); if (ch && currentStyle) { const v = ch.dataset.sku; return showStyle(currentStyle.style_code, v === "ALL" ? null : v, v === "ALL" || v.startsWith("C:") ? null : currentStyle.colour); }
   const tc = e.target.closest("td[data-colour]"); if (tc && currentStyle) return showStyle(currentStyle.style_code, null, currentStyle.colour === tc.dataset.colour && !currentStyle.sku ? null : tc.dataset.colour);
   const td = e.target.closest("td[data-sku]"); if (td && currentStyle) showStyle(currentStyle.style_code, td.dataset.sku, currentStyle.colour);
@@ -374,6 +410,89 @@ function shrinkImage(file, max) {
     };
     img.onerror = () => rej(new Error("unsupported image")); img.src = url;
   });
+}
+
+/* ---------- compare several styles (a set) ---------- */
+async function showCompare(styles) {
+  currentStyle = null; location.hash = "";
+  main.innerHTML = `<div class="spin">Loading ${styles.length} pieces…</div>`;
+  let prods, stock;
+  try {
+    const inList = styles.map(x => `"${x}"`).join(",");
+    [prods, stock] = await Promise.all([
+      api(`products?style_code=in.(${inList})&select=sku,style_code,product_name,colour,size,category`),
+      api(`v_stock?style_code=in.(${inList})&select=sku,style_code,location_code,location_name,location_type,qty,bucket`)
+    ]);
+  } catch (e) { main.innerHTML = `<div class="err">${esc(e.message)}</div>`; return; }
+  const name = p => (prods.find(x => x.style_code === p) || {}).product_name || p;
+  const availBySku = {}; for (const s of stock) if (s.bucket === "store" || s.bucket === "warehouse") availBySku[s.sku] = (availBySku[s.sku] || 0) + s.qty;
+  // per-piece size grid
+  const pieces = styles.map(st => {
+    const ps = prods.filter(p => p.style_code === st);
+    const colours = [...new Set(ps.map(p => p.colour || "—"))], sizes = [...new Set(ps.map(p => p.size || "—"))].sort((a,b)=>sizeIdx(a)-sizeIdx(b));
+    const total = ps.reduce((a,p)=>a+(availBySku[p.sku]||0),0);
+    let t = `<div class="piece"><h3>${esc(name(st))}<span>${esc(st)} · ${total} pcs</span></h3><div class="matrix"><table><thead><tr><th>Colour</th>${sizes.map(z=>`<th>${esc(z)}</th>`).join("")}</tr></thead><tbody>`;
+    for (const c of colours) t += `<tr><td>${esc(c)}</td>` + sizes.map(z => { const p = ps.find(x => (x.colour||"—")===c && (x.size||"—")===z); if (!p) return `<td class="z">·</td>`; const q = availBySku[p.sku]||0; return `<td class="${q?"":"z"}" data-sku="${esc(p.sku)}">${q}</td>`; }).join("") + `</tr>`;
+    return t + `</tbody></table></div></div>`;
+  }).join("");
+  // per-location: qty of each piece
+  const byLoc = {};
+  for (const s of stock) { if (s.bucket !== "store" && s.bucket !== "warehouse") continue; const k = s.location_code; byLoc[k] = byLoc[k] || { name: s.location_name, type: s.location_type, q: {} }; byLoc[k].q[s.style_code] = (byLoc[k].q[s.style_code] || 0) + s.qty; }
+  const locRows = Object.entries(byLoc).map(([code, l]) => ({ code, ...l, full: styles.every(st => (l.q[st]||0) > 0), sum: styles.reduce((a,st)=>a+(l.q[st]||0),0) }))
+    .sort((a,b) => (isMine(b.code)-isMine(a.code)) || (b.full-a.full) || b.sum-a.sum);
+  const short = st => { const n = name(st); const m = /(Kurta|Pant|Dupatta|Chunni|Top|Shirt|Skirt|Jacket|Set|Jutti|Shoes|Lehenga|Saree|Dress|Bag)/i.exec(n); return m ? m[1] : st; };
+  const locLine = l => `<div class="loc ${l.full?"full":""} ${isMine(l.code)?"mine":""}"><span class="n">${esc(l.name)}${isMine(l.code)?"<small>yours</small>":""}${l.full?"<small>full set</small>":""}</span><span class="q">${styles.map(st=>`<b>${l.q[st]||0}</b> ${esc(short(st))}`).join("<i>·</i>")}</span></div>`;
+  const stores = locRows.filter(l => l.type === "Store"), whs = locRows.filter(l => l.type === "WH");
+  const fullCount = stores.filter(l => l.full).length;
+  main.innerHTML = `<div class="detail cmp">
+    <button type="button" class="back">‹ Results</button>
+    <h1>${styles.map(st => esc(short(st))).join(" + ")}</h1>
+    <div class="sub">${styles.map(st=>esc(name(st))).join(" · ")}<br>${fullCount} store${fullCount===1?"":"s"} ha${fullCount===1?"s":"ve"} every piece in stock (any size)</div>
+    ${pieces}
+    <div class="bucket"><h2>Warehouse</h2>${whs.length ? whs.map(locLine).join("") : `<div class="empty">None in warehouse</div>`}</div>
+    <div class="bucket"><h2>Stores</h2>${stores.length ? stores.map(locLine).join("") : `<div class="empty">Not in any store</div>`}</div>
+  </div>`;
+  window.scrollTo(0,0);
+}
+
+/* ---------- browse a location by size / colour / category ---------- */
+let browseState = null;
+async function browse() {
+  if (!myStores.length) { openStoreModal(); return; }
+  browseState = browseState || { size: "", colour: "", category: "" };
+  currentStyle = null; lastSearch = ""; location.hash = "";
+  const names = myStores.map(c => (locations.find(x => x.code === c) || {}).display_name).filter(Boolean).join(", ");
+  main.innerHTML = `<div class="browse"><div class="bar"><span class="n">Browsing ${esc(names)}</span></div><div class="spin">Loading…</div></div>`;
+  let facets;
+  try { facets = await api("rpc/browse_facets", { method: "POST", body: JSON.stringify({ locs: myStores }) }); }
+  catch (e) { main.innerHTML = `<div class="err">${esc(e.message)}</div>`; return; }
+  const opts = (kind, cur, label) => `<option value="">${label}</option>` + facets.filter(f => f.kind === kind).sort((a,b) => kind === "size" ? sizeIdx(a.value)-sizeIdx(b.value) : b.n-a.n).map(f => `<option value="${esc(f.value)}" ${f.value===cur?"selected":""}>${esc(f.value)} (${f.n})</option>`).join("");
+  main.innerHTML = `<div class="browse">
+    <div class="bar"><span class="n">Browsing ${esc(names)}</span><button type="button" class="chip" id="browseClose">Close</button></div>
+    <div class="sel">
+      <select id="bSize">${opts("size", browseState.size, "Any size")}</select>
+      <select id="bColour">${opts("colour", browseState.colour, "Any colour")}</select>
+      <select id="bCat" class="cat">${opts("category", browseState.category, "Any category")}</select>
+    </div>
+    <div id="bList"><div class="hint">Pick a size, colour or category to list what these stores have.</div></div>
+  </div>`;
+  const run = async () => {
+    browseState = { size: $("#bSize").value, colour: $("#bColour").value, category: $("#bCat").value };
+    if (!browseState.size && !browseState.colour && !browseState.category) { $("#bList").innerHTML = `<div class="hint">Pick a size, colour or category to list what these stores have.</div>`; return; }
+    $("#bList").innerHTML = `<div class="spin">Loading…</div>`;
+    try {
+      const rows = await api("rpc/browse_styles", { method: "POST", body: JSON.stringify({ locs: myStores, f_size: browseState.size || null, f_colour: browseState.colour || null, f_category: browseState.category || null, lim: 300 }) });
+      if (!rows.length) { $("#bList").innerHTML = `<div class="hint"><b>Nothing matches</b>Try a different size or colour.</div>`; return; }
+      const thumbs = await thumbsFor(rows.map(r => r.style_code));
+      $("#bList").innerHTML = `<div class="bar"><span class="n">${rows.length} style${rows.length===1?"":"s"} · ${rows.reduce((a,r)=>a+Number(r.qty),0)} pcs</span></div><div class="results">` + rows.map(r => {
+        const th = thumbs[r.style_code];
+        return `<button type="button" class="row browse-row" data-style="${esc(r.style_code)}">${th ? `<img class="thumb" src="${esc(th)}" alt="" loading="lazy">` : ""}<div class="name">${esc(r.product_name||r.style_code)}<small>${esc(r.style_code)}${r.category ? " · " + esc(r.category) : ""}</small><span class="meta">${browseState.size ? "" : "Sizes: " + esc(r.sizes||"") + " · "}${browseState.colour ? "" : esc(r.colours||"")}</span></div><span class="qty ${r.qty > 5 ? "ok" : "low"}">${r.qty} pcs</span></button>`;
+      }).join("") + `</div>`;
+    } catch (e) { $("#bList").innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+  };
+  ["#bSize","#bColour","#bCat"].forEach(id => $(id).onchange = run);
+  $("#browseClose").onclick = () => { browseState = null; home(); };
+  if (browseState.size || browseState.colour || browseState.category) run();
 }
 
 /* ---------- SKU lookup (from scan) ---------- */

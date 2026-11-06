@@ -251,7 +251,7 @@ try {
   }
   if (backfillDays) log("backfill mode: no purge (base comes from load-base)");
   await sb(`sync_runs?id=eq.${run.id}`, { method: "PATCH", body: { status: "ok", finished_at: new Date().toISOString(), rows_upserted: invRows.length, error: skuWarn } });
-  await sb("rpc/refresh_sales_views", { method: "POST", body: {} }).catch(e => log("refresh_sales_views failed (non-fatal):", e.message));   // sales dashboard stock snapshot
+  await fetch(`${SUPABASE_URL}/functions/v1/publish-snapshot`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).catch(e => log("snapshot publish skipped:", e.message));
   log("done");
 } catch (e) {
   log("FAILED", e.message);

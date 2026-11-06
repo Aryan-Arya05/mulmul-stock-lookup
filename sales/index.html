@@ -222,6 +222,12 @@ async function rpc(name, args={}){
   if(!r.ok) throw new Error(`${name}: ${r.status} ${await r.text()}`);
   return r.json();
 }
+// Static snapshot files (published to Storage/CDN after every rebuild). Falls back to the live query if a file is missing.
+const SNAP = `${SUPABASE_URL}/storage/v1/object/public/dashboard`;
+async function snap(name, fallback){
+  try { const r = await fetch(`${SNAP}/${name}.json?t=${Math.floor(Date.now()/60000)}`); if(r.ok) return await r.json(); } catch(e){}
+  return fallback();
+}
 async function qAll(path, page=1000){ // page through PostgREST (server caps at 1000 rows per request)
   let out=[], from=0;
   for(;;){ const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { headers:{ apikey:SUPABASE_KEY, Authorization:`Bearer ${SUPABASE_KEY}`, Range:`${from}-${from+page-1}`, Prefer:"count=none" } });
@@ -235,15 +241,16 @@ const iso = dt => dt.toISOString().slice(0,10);
 
 async function load(){
   const since = iso(new Date(mondayOf(new Date()).getTime() - 8*7*86400000));
-  const [repl, launches, sync, settings] = await Promise.all([
-    q("v_replenishment_formula?select=*&order=collection,top_name,colour"),
-    q("v_launch_summary?select=*&order=launch_date.desc"),
-    q("sync_state?select=*"), q("settings?select=*"),
+  const [repl, launches, syncFile] = await Promise.all([
+    snap("replenishment", () => q("v_replenishment_formula?select=*&order=collection,top_name,colour")),
+    snap("launches", () => q("v_launch_summary?select=*&order=launch_date.desc")),
+    snap("sync", async () => ({ sync: await q("sync_state?select=*"), settings: await q("settings?select=*") })),
   ]);
+  const sync = syncFile.sync, settings = syncFile.settings; S.generatedAt = syncFile.generated_at;
   Object.assign(S, { repl, launches, sync }); settings.forEach(s => S.settings[s.key] = s.value);
   renderFresh(); renderOverview(); renderRepl(); renderProd();          // first paint from the light queries
   let weekly=[], summary=[], stores=[];
-  try { [weekly, summary] = await Promise.all([ rpc("dashboard_weekly", { since }), rpc("dashboard_products") ]);
+  try { [weekly, summary] = await Promise.all([ snap("weekly", () => rpc("dashboard_weekly", { since })), snap("products", () => rpc("dashboard_products")) ]);
     S.stock = {}; summary.forEach(x => S.stock[`${x.style_code}|${x.colour}`] = x); } catch(e){ $("#prodTable").innerHTML = `<tbody><tr><td class="empty err">Could not load product history: ${esc(e.message)} — reload the page</td></tr></tbody>`; throw e; }
   Object.assign(S, { weekly, summary, stores });
   renderOverview(); renderAttr(); renderProducts(); renderSugg(); if(S.period) renderPeriod();
@@ -254,7 +261,8 @@ function renderFresh(){
   const v = S.sync.find(s=>s.job==="vinculum_orders"), sh = S.sync.find(s=>s.job==="sheet_replenishment"), ss = S.sync.find(s=>s.job==="sheet_sales");
   const rep = S.repl[0]?.report_date, stock = S.repl.find(r=>r.on_hand>0);
   const ago = t => t ? `${Math.round((Date.now()-new Date(t))/60000)} min ago` : "never";
-  $("#fresh").innerHTML = `<span>Sales to <b>${d(rep)}</b></span><span>Orders sync <b>${v? (v.status==="ok"?ago(v.last_run):v.status) : "not yet"}</b></span><span>Sheet <b>${sh?ago(sh.last_run):"never"}</b></span>`;
+  const vs = v ? (v.status==="ok" ? ago(v.last_run) : `retrying · last ok ${ago(v.watermark)}`) : "not yet";
+  $("#fresh").innerHTML = `<span>Sales to <b>${d(rep)}</b></span><span>Orders sync <b>${vs}</b></span><span>Sheet <b>${sh?ago(sh.last_run):"never"}</b></span>${S.generatedAt?`<span>Snapshot <b>${ago(S.generatedAt)}</b></span>`:""}`;
 }
 
 // ---------- CSV export ----------
@@ -520,7 +528,7 @@ function renderAttr(){
   const agg = {};
   const add = (k, ch, u) => { if(!k) k="(none)"; agg[k] ??= {label:k,a:0,b:0}; if(ch==="Online") agg[k].a+=u; else agg[k].b+=u; };
   if(dim==="location_name"){
-    if(!S.storeTotals){ S.storeTotals=[]; $("#aTitle").textContent="Loading stores…"; rpc("dashboard_store_totals").then(r=>{ S.storeTotals=r; renderAttr(); }); return; }
+    if(!S.storeTotals){ S.storeTotals=[]; $("#aTitle").textContent="Loading stores…"; snap("store_totals", () => rpc("dashboard_store_totals")).then(r=>{ S.storeTotals=r; renderAttr(); }); return; }
     S.storeTotals.forEach(x => { if(cat&&x.category!==cat) return; if(chan==="Online") return; add(x.location_name,"Store",+x.units); }); $("#aTitle").textContent="Units by store (all time)"; }
   else if(dim==="size"){ $("#aTitle").textContent="Size curve — use a style's drill-down for per-style sizes"; S.summary.forEach(()=>{}); }
   else {

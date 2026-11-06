@@ -116,8 +116,20 @@ svg text{font-family:var(--sans);font-size:11px;fill:var(--muted)}
 </div></header>
 <main>
   <section id="overview" class="on">
+    <div class="filters">
+      <select id="ovPreset"><option value="all">All time (since launch)</option><option value="7">Last 7 days</option><option value="14">Last 14 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="tm">This month</option><option value="lm">Last month</option><option value="custom">Custom…</option></select>
+      <input type="date" id="ovFrom"><span class="muted">to</span><input type="date" id="ovTo">
+      <button class="btn" id="ovApply" type="button">Apply</button>
+      <span class="right muted" id="ovPeriodNote"></span>
+    </div>
     <h2>Launches <small id="ovNote"></small></h2>
     <div class="cards" id="launchCards"></div>
+    <div id="ovPeriod" style="display:none;margin-top:14px">
+      <div class="grid2">
+        <div class="chart"><h3 id="ovDailyTitle">Units per day — online vs store</h3><div class="legend"><span><i style="background:var(--online)"></i>Online</span><span><i style="background:var(--store)"></i>Store</span></div><div id="chDaily"></div></div>
+        <div class="chart"><h3>Best sellers in this period</h3><div class="filters" style="margin:0 0 8px"><select id="ovCat"><option value="">All categories</option></select><select id="ovChan"><option value="">Online + Store</option><option>Online</option><option>Store</option></select><button class="btn right" id="ovExport" type="button">Export CSV</button></div><div class="tw" style="max-height:520px"><table id="ovTop"></table></div></div>
+      </div>
+    </div>
     <div class="grid2" style="margin-top:14px">
       <div class="chart"><h3>Units per week — online vs store</h3><div class="legend"><span><i style="background:var(--online)"></i>Online</span><span><i style="background:var(--store)"></i>Store</span></div><div id="chWeekly"></div></div>
       <div class="chart"><h3>Top movers, last 7 days <span class="muted">(replenished styles)</span></h3><div id="movers"></div></div>
@@ -299,18 +311,21 @@ document.addEventListener("mouseout", e => { if(e.target.getAttribute && e.targe
 function trendChip(cur, prev){ if(!prev && !cur) return ""; const pct = prev ? Math.round((cur-prev)/prev*100) : null;
   return pct==null ? `<span class="trend up">new</span>` : `<span class="trend ${pct>=0?"up":"down"}">${pct>=0?"▲":"▼"} ${Math.abs(pct)}%</span>`; }
 function renderOverview(){
-  const L = S.launches;
-  $("#ovNote").textContent = `${L.length} launches tracked in the replenishment sheet`;
-  $("#launchCards").innerHTML = L.map(l => `<div class="card">
+  const L = S.launches, P = S.period;
+  let per = null;
+  if(P){ per = {}; const key = {}; S.repl.forEach(r => key[`${r.style_code}|${r.colour}`] = r.collection);
+    P.rows.forEach(r => { const c = key[`${r.style_code}|${r.colour}`]; if(!c) return; per[c] ??= {u:0,a:0,b:0}; per[c].u += +r.units; per[c].a += +r.online_units||0; per[c].b += +r.store_units||0; }); }
+  $("#ovNote").textContent = `${L.length} launches tracked in the replenishment sheet${P?` · showing ${d(P.from)} – ${d(P.to)}`:""}`;
+  $("#launchCards").innerHTML = L.map(l => { const pp = per ? (per[l.collection]||{u:0,a:0,b:0}) : null; return `<div class="card">
     <div class="t"><span>${esc(l.collection)}</span><span class="muted" style="font-weight:400">${d(l.launch_date)}</span></div>
-    <div class="hero num">${n0(l.total_sold)}<small>units sold</small></div>
+    <div class="hero num">${pp ? n0(pp.u) : n0(l.total_sold)}<small>${pp ? `units in period · ${n1(pp.u/P.days)}/day` : "units sold"}</small></div>
     <div class="kv">
-      <span>Last 7 days</span><b class="num">${n0(l.units_7d)} ${trendChip(l.units_7d,l.units_prev_7d)}</b>
-      <span>Online / store</span><b class="num">${l.total_sold?Math.round(l.online_units/l.total_sold*100):0}% / ${l.total_sold?Math.round(l.store_units/l.total_sold*100):0}%</b>
+      ${pp ? `<span>All time</span><b class="num">${n0(l.total_sold)}</b>` : `<span>Last 7 days</span><b class="num">${n0(l.units_7d)} ${trendChip(l.units_7d,l.units_prev_7d)}</b>`}
+      <span>Online / store</span><b class="num">${pp ? (pp.u?`${Math.round(pp.a/pp.u*100)}% / ${Math.round(pp.b/pp.u*100)}%`:"–") : `${l.total_sold?Math.round(l.online_units/l.total_sold*100):0}% / ${l.total_sold?Math.round(l.store_units/l.total_sold*100):0}%`}</b>
       <span>On hand</span><b class="num">${n0(l.on_hand)}</b>
       <span>Ordered + pipeline</span><b class="num">${n0(l.total_repl)} + ${n0(l.pipeline_qty)}</b>
       <span>Still short</span><b class="num ${l.total_shortfall>0?"err":""}">${n0(l.total_shortfall)} <span class="muted">(${l.styles_short}/${l.style_colours} styles)</span></b>
-    </div></div>`).join("") || `<div class="empty">No replenishment rows yet — the sheet sync hasn't run.</div>`;
+    </div></div>`; }).join("") || `<div class="empty">No replenishment rows yet — the sheet sync hasn't run.</div>`;
   // weekly chart (all styles)
   const wk = {}; S.weekly.forEach(r => { const k=r.week_start; wk[k] ??= {label:d(k), a:0,b:0}; if(r.channel==="Online") wk[k].a+=+r.units; else wk[k].b+=+r.units; });
   $("#chWeekly").innerHTML = barsSvg(Object.keys(wk).sort().map(k=>wk[k]));
@@ -318,6 +333,44 @@ function renderOverview(){
   $("#movers").innerHTML = `<table>${mv.map(r=>`<tr class="click" data-k="${esc(r.style_code)}|${esc(r.colour)}"><td><b>${esc(r.top_name)}</b> <span class="muted">${esc(title(r.colour))}</span></td><td class="r num">${n0(r.units_7d)}</td><td>${trendChip(r.units_7d,r.units_prev_7d)}</td><td>${covChip(r)}</td></tr>`).join("")}</table>`;
   $("#movers").querySelectorAll("tr.click").forEach(tr => tr.onclick = () => openDrawer(tr.dataset.k));
 }
+// ---------- Overview period filter ----------
+const fmtD = dt => iso(dt);
+function presetRange(v){ const today=new Date(); today.setHours(0,0,0,0); const to=new Date(today);
+  if(v==="tm") return [new Date(today.getFullYear(),today.getMonth(),1), to];
+  if(v==="lm") return [new Date(today.getFullYear(),today.getMonth()-1,1), new Date(today.getFullYear(),today.getMonth(),0)];
+  const n=+v; return [new Date(today.getTime()-(n-1)*86400000), to]; }
+$("#ovPreset").onchange = () => { const v=$("#ovPreset").value; if(v==="all"){ $("#ovFrom").value=""; $("#ovTo").value=""; applyPeriod(); return; } if(v==="custom") return; const [a,b]=presetRange(v); $("#ovFrom").value=fmtD(a); $("#ovTo").value=fmtD(b); applyPeriod(); };
+$("#ovApply").onclick = applyPeriod;
+["ovCat","ovChan"].forEach(id => $("#"+id).addEventListener("input", renderPeriod));
+async function applyPeriod(){
+  const from=$("#ovFrom").value, to=$("#ovTo").value;
+  if(!from||!to){ S.period=null; $("#ovPeriod").style.display="none"; $("#ovPeriodNote").textContent=""; renderOverview(); return; }
+  $("#ovPeriodNote").textContent="Loading…";
+  const [rows, daily] = await Promise.all([ rpc("dashboard_period",{d_from:from,d_to:to}), rpc("dashboard_period_daily",{d_from:from,d_to:to}) ]);
+  const days = Math.round((new Date(to)-new Date(from))/86400000)+1;
+  S.period = { from, to, days, rows, daily };
+  $("#ovPeriod").style.display="block"; renderOverview(); renderPeriod();
+}
+function renderPeriod(){
+  const P=S.period; if(!P) return;
+  const meta={}; S.summary.forEach(x=>meta[`${x.style_code}|${x.colour}`]=x);
+  const repl={}; S.repl.forEach(r=>repl[`${r.style_code}|${r.colour}`]=r);
+  fillSelect($("#ovCat"), P.rows.map(r=>meta[`${r.style_code}|${r.colour}`]?.category), "All categories");
+  const cat=$("#ovCat").value, chan=$("#ovChan").value;
+  const tot = P.rows.reduce((t,r)=>t+ +r.units,0);
+  $("#ovPeriodNote").textContent = `${d(P.from)} – ${d(P.to)} · ${P.days} days · ${n0(tot)} units`;
+  const dd={}; P.daily.forEach(x=>{ dd[x.sale_date] ??= {label:d(x.sale_date),a:0,b:0}; if(x.channel==="Online") dd[x.sale_date].a+=+x.units; else dd[x.sale_date].b+=+x.units; });
+  $("#chDaily").innerHTML = barsSvg(Object.keys(dd).sort().map(k=>dd[k]), {h:220});
+  let rows = P.rows.map(r=>{ const m=meta[`${r.style_code}|${r.colour}`]||{}; const st=(S.stock||{})[`${r.style_code}|${r.colour}`]||{}; const u = chan==="Online"?+r.online_units||0: chan==="Store"?+r.store_units||0: +r.units;
+    return {...r, category:m.category, collection:m.collection||repl[`${r.style_code}|${r.colour}`]?.collection||"", u, per_day: u/P.days, on_hand:(+st.store_on_hand||0)+(+st.wh_on_hand||0), share: tot?u/tot*100:0}; })
+    .filter(r=>(!cat||r.category===cat) && r.u>0).sort((a,b)=>b.u-a.u);
+  S._periodRows = rows;
+  $("#ovTop").innerHTML = `<thead><tr><th>#</th><th>Style</th><th>Colour</th><th>Category</th><th>Launch</th><th class="r">Units</th><th class="r">Share</th><th class="r">/day</th><th class="r">Online</th><th class="r">Store</th><th class="r">On hand</th></tr></thead><tbody>${
+    rows.slice(0,50).map((r,i)=>`<tr class="click" data-k="${esc(r.style_code)}|${esc(r.colour||"")}"><td class="muted">${i+1}</td><td><b>${esc(r.product_name||"")}</b></td><td>${esc(title(r.colour))}</td><td class="muted">${esc(r.category||"")}</td><td class="muted">${esc(r.collection||"")}</td><td class="r num"><b>${n0(r.u)}</b></td><td class="r num">${r.share.toFixed(1)}%</td><td class="r num">${n1(r.per_day)}</td><td class="r num">${n0(r.online_units)}</td><td class="r num">${n0(r.store_units)}</td><td class="r num ${r.on_hand===0?"err":""}">${n0(r.on_hand)}</td></tr>`).join("")}</tbody>`;
+  $("#ovTop").querySelectorAll("tr.click").forEach(tr => tr.onclick = () => openDrawer(tr.dataset.k));
+}
+$("#ovExport").onclick = () => exportCsv(`mulmul-best-sellers-${S.period?.from}-to-${S.period?.to}.csv`, [["product_name","Style"],["style_code","Style code"],[r=>title(r.colour),"Colour"],["category","Category"],["collection","Launch"],["u","Units"],[r=>r.share.toFixed(1),"Share %"],[r=>r.per_day.toFixed(2),"Units/day"],["online_units","Online"],["store_units","Store"],["on_hand","On hand"],["days_with_sales","Days with sales"]], S._periodRows||[]);
+
 function covChip(r){ return r.coverage==="Covered" ? `<span class="chip good">Covered</span>` : `<span class="chip bad">Short ${n0(r.shortfall)}</span>`; }
 function stageChip(s){ const c = s==="Delivered"?"good": s==="Overdue"?"bad": s==="No replenishment"?"none": s==="Ordered"?"warn":"prod"; return `<span class="chip ${c}">${esc(s)}</span>`; }
 

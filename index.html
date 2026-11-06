@@ -89,6 +89,15 @@ main{flex:1;padding:12px max(16px,env(safe-area-inset-right,0px)) calc(32px + en
 .cmp .loc .q b{font-weight:600}
 .cmp .loc .q i{font-style:normal;color:var(--muted);margin:0 4px}
 .cmp .loc.full{background:var(--ok-bg)}
+.cmpt th:first-child,.cmpt td:first-child{min-width:120px;white-space:normal;line-height:1.25}
+.cmpt td:first-child small{display:block;color:var(--muted);font-size:11px;font-weight:400}
+.cmpt td:first-child small.fs{color:var(--ok);font-weight:600}
+.cmpt tr.full td{background:var(--ok-bg)}
+.cmpt tr.full td:first-child{background:var(--ok-bg)}
+.cmpt td.y{color:var(--ok);font-weight:600}
+.cmpt td.n{color:var(--none)}
+.cmpt .szs{display:inline-flex;gap:3px;flex-wrap:wrap;justify-content:center;max-width:120px}
+.cmpt .szs i{font-style:normal;font-size:11px;padding:1px 5px;border-radius:5px;background:var(--ok-bg);color:var(--ok);font-weight:600}
 .browse{display:flex;flex-direction:column;gap:10px}
 .browse .sel{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .browse select{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--fg);font-size:15px;appearance:auto}
@@ -329,7 +338,7 @@ $("#clear").onclick = () => { q.value = ""; $("#searchBox").classList.remove("ha
 function home(){ currentStyle = null; browseState = null; location.hash = ""; main.innerHTML = `<div class="hint"><b>Find any article in seconds</b>Type a style code like <code>SW2523</code>, a full SKU like <code>SW2523YS</code>, or a product name. Tap <strong>Photo</strong> to find a product from a picture, or <strong>Scan</strong> for the barcode on the tag.<br><br><button type="button" class="chip" id="browseBtn">Browse my stores by size / colour</button></div>`; $("#browseBtn").onclick = browse; }
 
 async function search(v, direct) {
-  lastSearch = v; currentStyle = null; browseState = null; compareMode = false; picked.clear();
+  lastSearch = v; currentStyle = null; browseState = null; cmpState = null; compareMode = false; picked.clear();
   main.innerHTML = `<div class="spin">Searching…</div>`;
   try {
     const rows = await api("rpc/search_styles", { method: "POST", body: JSON.stringify({ q: v, lim: 25 }) });
@@ -354,6 +363,8 @@ function renderResults() {
 main.addEventListener("click", e => {
   if (e.target.closest("#cmpToggle")) { compareMode = !compareMode; if (!compareMode) picked.clear(); return renderResults(); }
   if (e.target.closest("#cmpGo")) return showCompare([...picked]);
+  const cc = e.target.closest("[data-cmp-colour]"); if (cc && cmpState) return showCompare(cmpState.styles, cc.dataset.cmpColour || null, cmpState.size);
+  const cs = e.target.closest("[data-cmp-size]"); if (cs && cmpState) return showCompare(cmpState.styles, cmpState.colour, cs.dataset.cmpSize || null);
   const r = e.target.closest(".row[data-style]");
   if (r && compareMode) { const c = r.dataset.style; picked.has(c) ? picked.delete(c) : picked.add(c); return renderResults(); }
   if (r) return showStyle(r.dataset.style, null);
@@ -413,8 +424,10 @@ function shrinkImage(file, max) {
 }
 
 /* ---------- compare several styles (a set) ---------- */
-async function showCompare(styles) {
+let cmpState = null;   // { styles, colour, size }
+async function showCompare(styles, colour, size) {
   currentStyle = null; location.hash = "";
+  cmpState = { styles, colour: colour || null, size: size || null };
   main.innerHTML = `<div class="spin">Loading ${styles.length} pieces…</div>`;
   let prods, stock;
   try {
@@ -425,32 +438,47 @@ async function showCompare(styles) {
     ]);
   } catch (e) { main.innerHTML = `<div class="err">${esc(e.message)}</div>`; return; }
   const name = p => (prods.find(x => x.style_code === p) || {}).product_name || p;
-  const availBySku = {}; for (const s of stock) if (s.bucket === "store" || s.bucket === "warehouse") availBySku[s.sku] = (availBySku[s.sku] || 0) + s.qty;
-  // per-piece size grid
-  const pieces = styles.map(st => {
-    const ps = prods.filter(p => p.style_code === st);
-    const colours = [...new Set(ps.map(p => p.colour || "—"))], sizes = [...new Set(ps.map(p => p.size || "—"))].sort((a,b)=>sizeIdx(a)-sizeIdx(b));
-    const total = ps.reduce((a,p)=>a+(availBySku[p.sku]||0),0);
-    let t = `<div class="piece"><h3>${esc(name(st))}<span>${esc(st)} · ${total} pcs</span></h3><div class="matrix"><table><thead><tr><th>Colour</th>${sizes.map(z=>`<th>${esc(z)}</th>`).join("")}</tr></thead><tbody>`;
-    for (const c of colours) t += `<tr><td>${esc(c)}</td>` + sizes.map(z => { const p = ps.find(x => (x.colour||"—")===c && (x.size||"—")===z); if (!p) return `<td class="z">·</td>`; const q = availBySku[p.sku]||0; return `<td class="${q?"":"z"}" data-sku="${esc(p.sku)}">${q}</td>`; }).join("") + `</tr>`;
-    return t + `</tbody></table></div></div>`;
-  }).join("");
-  // per-location: qty of each piece
-  const byLoc = {};
-  for (const s of stock) { if (s.bucket !== "store" && s.bucket !== "warehouse") continue; const k = s.location_code; byLoc[k] = byLoc[k] || { name: s.location_name, type: s.location_type, q: {} }; byLoc[k].q[s.style_code] = (byLoc[k].q[s.style_code] || 0) + s.qty; }
-  const locRows = Object.entries(byLoc).map(([code, l]) => ({ code, ...l, full: styles.every(st => (l.q[st]||0) > 0), sum: styles.reduce((a,st)=>a+(l.q[st]||0),0) }))
-    .sort((a,b) => (isMine(b.code)-isMine(a.code)) || (b.full-a.full) || b.sum-a.sum);
-  const short = st => { const n = name(st); const m = /(Kurta|Pant|Dupatta|Chunni|Top|Shirt|Skirt|Jacket|Set|Jutti|Shoes|Lehenga|Saree|Dress|Bag)/i.exec(n); return m ? m[1] : st; };
-  const locLine = l => `<div class="loc ${l.full?"full":""} ${isMine(l.code)?"mine":""}"><span class="n">${esc(l.name)}${isMine(l.code)?"<small>yours</small>":""}${l.full?"<small>full set</small>":""}</span><span class="q">${styles.map(st=>`<b>${l.q[st]||0}</b> ${esc(short(st))}`).join("<i>·</i>")}</span></div>`;
-  const stores = locRows.filter(l => l.type === "Store"), whs = locRows.filter(l => l.type === "WH");
-  const fullCount = stores.filter(l => l.full).length;
+  const short = st => { const n = name(st); const m = /(Kurta|Pant|Dupatta|Chunni|Top|Shirt|Skirt|Jacket|Set|Jutti|Shoes|Lehenga|Saree|Dress|Bag|Blouse|Palazzo|Sharara|Garara)/i.exec(n); return m ? m[1] : st; };
+  const pBySku = Object.fromEntries(prods.map(p => [p.sku, p]));
+  const colours = [...new Set(prods.map(p => p.colour || "—"))].sort();
+  const sizesAll = [...new Set(prods.map(p => p.size || "—"))].sort((a,b)=>sizeIdx(a)-sizeIdx(b));
+  const match = p => (!colour || (p.colour || "—") === colour) && (!size || (p.size || "—") === size);
+
+  // per location per style: qty (filtered) and set of sizes in stock (filtered by colour only)
+  const loc = {};
+  for (const s of stock) {
+    if (s.bucket !== "store" && s.bucket !== "warehouse") continue;
+    const p = pBySku[s.sku]; if (!p) continue;
+    if (colour && (p.colour || "—") !== colour) continue;
+    const L = loc[s.location_code] = loc[s.location_code] || { code: s.location_code, name: s.location_name, type: s.location_type, q: {}, sizes: {} };
+    if (!size || (p.size || "—") === size) L.q[s.style_code] = (L.q[s.style_code] || 0) + s.qty;
+    (L.sizes[s.style_code] = L.sizes[s.style_code] || new Set()).add(p.size || "—");
+  }
+  const rows = Object.values(loc).map(L => ({ ...L, full: styles.every(st => (L.q[st] || 0) > 0), have: styles.filter(st => (L.q[st] || 0) > 0).length, sum: styles.reduce((a,st)=>a+(L.q[st]||0),0) }))
+    .filter(L => L.sum > 0)
+    .sort((a,b) => (isMine(b.code)-isMine(a.code)) || (b.full-a.full) || (b.have-a.have) || b.sum-a.sum);
+  const stores = rows.filter(l => l.type === "Store"), whs = rows.filter(l => l.type === "WH");
+  const fullStores = stores.filter(l => l.full);
+
+  const head = `<tr><th>Store</th>${styles.map(st=>`<th>${esc(short(st))}</th>`).join("")}</tr>`;
+  const cell = (L, st) => {
+    if (size) { const q = L.q[st] || 0; return `<td class="${q ? "y" : "n"}">${q ? "✓ " + q : "✗"}</td>`; }
+    const sz = sizesAll.filter(z => L.sizes[st]?.has(z));
+    return `<td class="${sz.length ? "" : "n"}"><span class="szs">${sz.length ? sz.map(z=>`<i>${esc(z)}</i>`).join("") : "✗"}</span></td>`;
+  };
+  const table = list => list.length ? `<div class="matrix cmpt"><table><thead>${head}</thead><tbody>${list.map(L => `<tr class="${L.full?"full":""} ${isMine(L.code)?"mine":""}"><td>${esc(L.name)}${isMine(L.code)?"<small>yours</small>":""}${L.full?"<small class=fs>full set</small>":""}</td>${styles.map(st=>cell(L,st)).join("")}</tr>`).join("")}</tbody></table></div>` : `<div class="empty">None</div>`;
+
+  const chip = (v, cur, kind, label) => `<button type="button" class="chip ${v===cur?"on":""}" data-cmp-${kind}="${esc(v ?? "")}">${esc(label ?? v)}</button>`;
+  const what = (colour ? colour : "Any colour") + (size ? " · " + size : "");
   main.innerHTML = `<div class="detail cmp">
     <button type="button" class="back">‹ Results</button>
     <h1>${styles.map(st => esc(short(st))).join(" + ")}</h1>
-    <div class="sub">${styles.map(st=>esc(name(st))).join(" · ")}<br>${fullCount} store${fullCount===1?"":"s"} ha${fullCount===1?"s":"ve"} every piece in stock (any size)</div>
-    ${pieces}
-    <div class="bucket"><h2>Warehouse</h2>${whs.length ? whs.map(locLine).join("") : `<div class="empty">None in warehouse</div>`}</div>
-    <div class="bucket"><h2>Stores</h2>${stores.length ? stores.map(locLine).join("") : `<div class="empty">Not in any store</div>`}</div>
+    <div class="sub">${styles.map(st=>esc(name(st))).join(" · ")}</div>
+    <div class="vsel"><span class="lbl">Colour</span>${chip(null, colour, "colour", "Any")}${colours.map(c=>chip(c, colour, "colour")).join("")}</div>
+    <div class="vsel"><span class="lbl">Size</span>${chip(null, size, "size", "Any")}${sizesAll.map(z=>chip(z, size, "size")).join("")}</div>
+    <div class="sub" style="margin-top:4px">${size ? `<b>${fullStores.length}</b> store${fullStores.length===1?"":"s"} ha${fullStores.length===1?"s":"ve"} the full set in <b>${esc(what)}</b>` : `Showing which sizes each store has${colour ? ` in <b>${esc(colour)}</b>` : ""}. Pick a size to see exact quantities.`}</div>
+    <div class="bucket"><h2>Stores</h2>${table(stores)}</div>
+    <div class="bucket"><h2>Warehouse</h2>${table(whs)}</div>
   </div>`;
   window.scrollTo(0,0);
 }

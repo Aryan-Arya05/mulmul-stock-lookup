@@ -138,7 +138,7 @@ svg text{font-family:var(--sans);font-size:11px;fill:var(--muted)}
   <section id="products">
     <h2>Product sale report <small>any style × colour, full history — click a row for the drill-down</small></h2>
     <div class="filters">
-      <input type="search" id="pSearch" placeholder="Search style name, code or colour… e.g. Bairi, WW2601, fuschia" autofocus>
+      <input type="search" id="pSearch" placeholder="One or many: Shvi - Elaan - Saia, or WW2601, or fuschia" autofocus style="min-width:420px">
       <select id="pCat"><option value="">All categories</option></select>
       <select id="pSort"><option value="units">Most sold</option><option value="_stock">Most stock</option><option value="last_sale">Most recent</option><option value="first_sale">Newest launch</option><option value="orders">Most orders</option></select>
       <span class="right muted" id="pCount"></span>
@@ -397,12 +397,13 @@ $("#scrim").onclick = closeDrawer;
 
 // ---------- Products (any style x colour) ----------
 function renderProducts(){
-  const q=$("#pSearch").value.toLowerCase().trim(), cat=$("#pCat").value, sort=$("#pSort").value;
+  const terms=$("#pSearch").value.toLowerCase().split(/[-,|\/\n;]+/).map(t=>t.trim()).filter(Boolean), cat=$("#pCat").value, sort=$("#pSort").value;
   fillSelect($("#pCat"), S.summary.map(x=>x.category), "All categories");
-  let rows = S.summary.filter(x => (!cat||x.category===cat) && (!q || `${x.product_name} ${x.style_code} ${x.colour} ${x.collection||""} ${x.segment||""}`.toLowerCase().includes(q)));
+  let rows = S.summary.filter(x => { if(cat&&x.category!==cat) return false; if(!terms.length) return true; const h=`${x.product_name} ${x.style_code} ${x.colour} ${x.collection||""} ${x.segment||""}`.toLowerCase(); return terms.some(t=>h.includes(t)); });
   const oh = x => { const st=(S.stock||{})[`${x.style_code}|${x.colour}`]||{}; return (+st.store_on_hand||0)+(+st.wh_on_hand||0); };
   rows.sort((a,b)=> sort==="_stock" ? oh(b)-oh(a) : sort==="units"||sort==="orders" ? (+b[sort]||0)-(+a[sort]||0) : String(b[sort]||"").localeCompare(String(a[sort]||"")));
-  $("#pCount").textContent = S.summary.length ? `${rows.length.toLocaleString("en-IN")} of ${S.summary.length.toLocaleString("en-IN")} style-colours` : "loading…";
+  const tot = rows.reduce((t,x)=>{ const st=(S.stock||{})[`${x.style_code}|${x.colour}`]||{}; t.u+=+x.units||0; t.oh+=(+st.store_on_hand||0)+(+st.wh_on_hand||0); t.p+=(+st.intransit||0)+(+st.in_production||0)+(+st.vir_store||0); return t; },{u:0,oh:0,p:0});
+  $("#pCount").textContent = S.summary.length ? `${rows.length.toLocaleString("en-IN")} of ${S.summary.length.toLocaleString("en-IN")} style-colours${terms.length?` · ${n0(tot.u)} sold · ${n0(tot.oh)} on hand · ${n0(tot.p)} pipeline`:""}` : "loading…";
   if(!S.summary.length) return;
   rows = rows.slice(0,300);
   const stock = {}; S.repl.forEach(r=>stock[`${r.style_code}|${r.colour}`]=r);

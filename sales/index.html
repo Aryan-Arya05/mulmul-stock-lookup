@@ -140,7 +140,7 @@ svg text{font-family:var(--sans);font-size:11px;fill:var(--muted)}
     <div class="filters">
       <input type="search" id="pSearch" placeholder="Search style name, code or colour… e.g. Bairi, WW2601, fuschia" autofocus>
       <select id="pCat"><option value="">All categories</option></select>
-      <select id="pSort"><option value="units">Most sold</option><option value="last_sale">Most recent</option><option value="first_sale">Newest launch</option><option value="orders">Most orders</option></select>
+      <select id="pSort"><option value="units">Most sold</option><option value="_stock">Most stock</option><option value="last_sale">Most recent</option><option value="first_sale">Newest launch</option><option value="orders">Most orders</option></select>
       <span class="right muted" id="pCount"></span>
     </div>
     <div class="tw"><table id="prodTable"><tbody><tr><td class="empty">Loading product history…</td></tr></tbody></table></div>
@@ -215,12 +215,13 @@ async function load(){
   ]);
   Object.assign(S, { repl, launches, sync }); settings.forEach(s => S.settings[s.key] = s.value);
   renderFresh(); renderOverview(); renderRepl(); renderProd();          // first paint from the light queries
-  let weekly=[], summary=[], stores=[];
-  try { [weekly, summary, stores] = await Promise.all([
+  let weekly=[], summary=[], stores=[], stockAll=[];
+  try { [weekly, summary, stores, stockAll] = await Promise.all([
     qAll(`v_weekly_style_colour?select=*&week_start=gte.${since}`),
     qAll("v_style_colour_summary?select=*"),
     qAll("v_store_style_colour?select=style_code,colour,location_name,units"),
-  ]); } catch(e){ $("#prodTable").innerHTML = `<tbody><tr><td class="empty err">Could not load product history: ${esc(e.message)} — reload the page</td></tr></tbody>`; throw e; }
+    qAll("v_stock_style_colour?select=style_code,colour,store_on_hand,wh_on_hand,intransit,in_production,vir_store"),
+  ]); S.stock = {}; stockAll.forEach(x => S.stock[`${x.style_code}|${x.colour}`] = x); } catch(e){ $("#prodTable").innerHTML = `<tbody><tr><td class="empty err">Could not load product history: ${esc(e.message)} — reload the page</td></tr></tbody>`; throw e; }
   Object.assign(S, { repl, launches, weekly, summary, stores, sync });
   settings.forEach(s => S.settings[s.key] = s.value);
   renderFresh(); renderOverview(); renderRepl(); renderAttr(); renderProd(); renderSugg();
@@ -399,14 +400,16 @@ function renderProducts(){
   const q=$("#pSearch").value.toLowerCase().trim(), cat=$("#pCat").value, sort=$("#pSort").value;
   fillSelect($("#pCat"), S.summary.map(x=>x.category), "All categories");
   let rows = S.summary.filter(x => (!cat||x.category===cat) && (!q || `${x.product_name} ${x.style_code} ${x.colour} ${x.collection||""} ${x.segment||""}`.toLowerCase().includes(q)));
-  rows.sort((a,b)=> sort==="units"||sort==="orders" ? (+b[sort]||0)-(+a[sort]||0) : String(b[sort]||"").localeCompare(String(a[sort]||"")));
+  const oh = x => { const st=(S.stock||{})[`${x.style_code}|${x.colour}`]||{}; return (+st.store_on_hand||0)+(+st.wh_on_hand||0); };
+  rows.sort((a,b)=> sort==="_stock" ? oh(b)-oh(a) : sort==="units"||sort==="orders" ? (+b[sort]||0)-(+a[sort]||0) : String(b[sort]||"").localeCompare(String(a[sort]||"")));
   $("#pCount").textContent = S.summary.length ? `${rows.length.toLocaleString("en-IN")} of ${S.summary.length.toLocaleString("en-IN")} style-colours` : "loading…";
   if(!S.summary.length) return;
   rows = rows.slice(0,300);
   const stock = {}; S.repl.forEach(r=>stock[`${r.style_code}|${r.colour}`]=r);
-  $("#prodTable").innerHTML = `<thead><tr><th>Style</th><th>Colour</th><th>Category</th><th>Segment / launch</th><th class="r">Units</th><th class="r">Online</th><th class="r">Store</th><th class="r">Orders</th><th>First sale</th><th>Last sale</th><th class="r">Days selling</th><th class="r">/day</th></tr></thead><tbody>${
+  $("#prodTable").innerHTML = `<thead><tr><th>Style</th><th>Colour</th><th>Category</th><th>Segment / launch</th><th class="r">Units</th><th class="r">Online</th><th class="r">Store</th><th class="r">Orders</th><th>First sale</th><th>Last sale</th><th class="r">/day</th><th class="r">On hand</th><th class="r">Stores / WH</th><th class="r">Pipeline</th></tr></thead><tbody>${
     rows.map(x=>{ const days = x.first_sale&&x.last_sale ? Math.max(1,(new Date(x.last_sale)-new Date(x.first_sale))/86400000+1) : null;
-      return `<tr class="click" data-k="${esc(x.style_code)}|${esc(x.colour)}"><td><b>${esc(x.product_name||"")}</b><br><span class="muted num" style="font-size:11px">${esc(x.style_code)}</span></td><td>${esc(title(x.colour))}</td><td class="muted">${esc(x.category||"")}</td><td class="muted">${esc(x.collection||x.segment||"")}</td><td class="r num"><b>${n0(x.units)}</b></td><td class="r num">${n0(x.online_units)}</td><td class="r num">${n0(x.store_units)}</td><td class="r num">${n0(x.orders)}</td><td>${d(x.first_sale)}</td><td>${d(x.last_sale)}</td><td class="r num">${days?n0(days):"–"}</td><td class="r num">${days?n1(x.units/days):"–"}</td></tr>`; }).join("")}</tbody>`;
+      const st = (S.stock||{})[`${x.style_code}|${x.colour}`] || {}; const so=+st.store_on_hand||0, wh=+st.wh_on_hand||0, pipe=(+st.intransit||0)+(+st.in_production||0)+(+st.vir_store||0);
+      return `<tr class="click" data-k="${esc(x.style_code)}|${esc(x.colour)}"><td><b>${esc(x.product_name||"")}</b><br><span class="muted num" style="font-size:11px">${esc(x.style_code)}</span></td><td>${esc(title(x.colour))}</td><td class="muted">${esc(x.category||"")}</td><td class="muted">${esc(x.collection||x.segment||"")}</td><td class="r num"><b>${n0(x.units)}</b></td><td class="r num">${n0(x.online_units)}</td><td class="r num">${n0(x.store_units)}</td><td class="r num">${n0(x.orders)}</td><td>${d(x.first_sale)}</td><td>${d(x.last_sale)}</td><td class="r num">${days?n1(x.units/days):"–"}</td><td class="r num"><b class="${so+wh===0?"err":""}">${n0(so+wh)}</b></td><td class="r num muted">${n0(so)} / ${n0(wh)}</td><td class="r num">${pipe?n0(pipe):"–"}</td></tr>`; }).join("")}</tbody>`;
   $("#prodTable").querySelectorAll("tr.click").forEach(tr => tr.onclick = () => openDrawer(tr.dataset.k));
 }
 ["pSearch","pCat","pSort"].forEach(id => $("#"+id).addEventListener("input", renderProducts));

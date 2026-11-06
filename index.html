@@ -97,7 +97,8 @@ main{flex:1;padding:12px max(16px,env(safe-area-inset-right,0px)) calc(32px + en
 .cmpt td.y{color:var(--ok);font-weight:600}
 .cmpt td.n{color:var(--none)}
 .cmpt .szs{display:inline-flex;gap:3px;flex-wrap:wrap;justify-content:center;max-width:120px}
-.cmpt .szs i{font-style:normal;font-size:11px;padding:1px 5px;border-radius:5px;background:var(--ok-bg);color:var(--ok);font-weight:600}
+.cmpt .szs i{font-style:normal;font-size:11px;padding:1px 5px;border-radius:5px;background:var(--ok-bg);color:var(--ok);font-weight:600;white-space:nowrap}
+.cmpt .szs i b{font-weight:700;margin-left:3px;color:var(--fg)}
 .browse{display:flex;flex-direction:column;gap:10px}
 .browse .sel{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .browse select{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--fg);font-size:15px;appearance:auto}
@@ -452,7 +453,8 @@ async function showCompare(styles, colour, size) {
     if (colour && (p.colour || "—") !== colour) continue;
     const L = loc[s.location_code] = loc[s.location_code] || { code: s.location_code, name: s.location_name, type: s.location_type, q: {}, sizes: {} };
     if (!size || (p.size || "—") === size) L.q[s.style_code] = (L.q[s.style_code] || 0) + s.qty;
-    (L.sizes[s.style_code] = L.sizes[s.style_code] || new Set()).add(p.size || "—");
+    const sz = L.sizes[s.style_code] = L.sizes[s.style_code] || {};
+    sz[p.size || "—"] = (sz[p.size || "—"] || 0) + s.qty;
   }
   const rows = Object.values(loc).map(L => ({ ...L, full: styles.every(st => (L.q[st] || 0) > 0), have: styles.filter(st => (L.q[st] || 0) > 0).length, sum: styles.reduce((a,st)=>a+(L.q[st]||0),0) }))
     .filter(L => L.sum > 0)
@@ -463,8 +465,8 @@ async function showCompare(styles, colour, size) {
   const head = `<tr><th>Store</th>${styles.map(st=>`<th>${esc(short(st))}</th>`).join("")}</tr>`;
   const cell = (L, st) => {
     if (size) { const q = L.q[st] || 0; return `<td class="${q ? "y" : "n"}">${q ? "✓ " + q : "✗"}</td>`; }
-    const sz = sizesAll.filter(z => L.sizes[st]?.has(z));
-    return `<td class="${sz.length ? "" : "n"}"><span class="szs">${sz.length ? sz.map(z=>`<i>${esc(z)}</i>`).join("") : "✗"}</span></td>`;
+    const sz = sizesAll.filter(z => (L.sizes[st]?.[z] || 0) > 0);
+    return `<td class="${sz.length ? "" : "n"}"><span class="szs">${sz.length ? sz.map(z=>`<i>${esc(z)}<b>${L.sizes[st][z]}</b></i>`).join("") : "✗"}</span></td>`;
   };
   const table = list => list.length ? `<div class="matrix cmpt"><table><thead>${head}</thead><tbody>${list.map(L => `<tr class="${L.full?"full":""} ${isMine(L.code)?"mine":""}"><td>${esc(L.name)}${isMine(L.code)?"<small>yours</small>":""}${L.full?"<small class=fs>full set</small>":""}</td>${styles.map(st=>cell(L,st)).join("")}</tr>`).join("")}</tbody></table></div>` : `<div class="empty">None</div>`;
 

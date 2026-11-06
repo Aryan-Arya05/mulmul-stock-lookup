@@ -216,7 +216,7 @@ const mondayOf = dt => { const x = new Date(dt); const day = (x.getDay()+6)%7; x
 const iso = dt => dt.toISOString().slice(0,10);
 
 async function load(){
-  const since = iso(new Date(mondayOf(new Date()).getTime() - 12*7*86400000));
+  const since = iso(new Date(mondayOf(new Date()).getTime() - 8*7*86400000));
   const [repl, launches, sync, settings] = await Promise.all([
     q("v_replenishment_formula?select=*&order=collection,top_name,colour"),
     q("v_launch_summary?select=*&order=launch_date.desc"),
@@ -229,7 +229,7 @@ async function load(){
     S.stock = {}; summary.forEach(x => S.stock[`${x.style_code}|${x.colour}`] = x); } catch(e){ $("#prodTable").innerHTML = `<tbody><tr><td class="empty err">Could not load product history: ${esc(e.message)} — reload the page</td></tr></tbody>`; throw e; }
   Object.assign(S, { weekly, summary, stores });
   renderOverview(); renderAttr(); renderProducts(); renderSugg();
-  S.storesReady = rpc("dashboard_stores").then(r => { S.stores = r; return r; });   // large; loaded after first paint
+  S.storeTotals = null;   // Attributes "Store" view loads a small server-side aggregate on demand
 }
 
 function renderFresh(){
@@ -364,11 +364,12 @@ async function openDrawer(key){
     <div class="row">${r._nonRepl ? `<span class="chip none">Not in replenishment sheet</span>` : covChip(r)+" "+stageChip(r.production_stage)} <span class="chip none">${n1(r.units_per_day)}/day over ${r.days_selling} days</span></div></div><button class="x" id="dx">Close</button></div>
     <div class="loading muted" style="padding:20px">Loading…</div>`;
   $("#dx").onclick = closeDrawer;
-  const [weekly, sizes, stock, daily] = await Promise.all([
+  const [weekly, sizes, stock, daily, storeRows] = await Promise.all([
     q(`v_weekly_style_colour?style_code=eq.${encodeURIComponent(style)}&colour=eq.${encodeURIComponent(colour)}&order=week_start`),
     q(`v_size_style_colour?style_code=eq.${encodeURIComponent(style)}&colour=eq.${encodeURIComponent(colour)}`),
     q(`v_stock_sku?style_code=eq.${encodeURIComponent(style)}&colour=eq.${encodeURIComponent(colour)}&select=size,location_name,location_type,bin,qty`),
     q(`v_daily_style_colour?style_code=eq.${encodeURIComponent(style)}&colour=eq.${encodeURIComponent(colour)}&order=sale_date`),
+    q(`v_store_style_colour?style_code=eq.${encodeURIComponent(style)}&colour=eq.${encodeURIComponent(colour)}&select=location_name,units`),
   ]);
   if(r._nonRepl){ // stock from the live inventory rows for products outside the replenishment sheet
     const pipe=["INTRANSIT","VIRTUAL-PRODUCTION","VIR-STORE"]; r.store_on_hand=0; r.wh_on_hand=0; r.intransit=0; r.in_production=0; r.vir_store=0;
@@ -378,8 +379,7 @@ async function openDrawer(key){
   const wk={}; weekly.forEach(w=>{ wk[w.week_start] ??= {label:d(w.week_start),a:0,b:0}; if(w.channel==="Online") wk[w.week_start].a+=+w.units; else wk[w.week_start].b+=+w.units; });
   const sz={}; const order=["XXS","XS","S","M","L","XL","XXL","2XL","3XL","4XL","5XL","6XL"]; sizes.forEach(s=>{ const k=s.size||"–"; sz[k] ??= {label:k,a:0,b:0}; if(s.channel==="Online") sz[k].a+=+s.units; else sz[k].b+=+s.units; });
   const szRows = Object.values(sz).sort((a,b)=> (order.indexOf(a.label)+1||99)-(order.indexOf(b.label)+1||99));
-  await S.storesReady;
-  const stM = {}; S.stores.filter(s=>s.style_code===style&&s.colour===colour).forEach(s=>{ const k=s.location_name||"?"; stM[k]=(stM[k]||0)+ +s.units; });
+  const stM = {}; storeRows.forEach(s=>{ const k=s.location_name||"?"; stM[k]=(stM[k]||0)+ +s.units; });
   const stores = Object.entries(stM).sort((a,b)=>b[1]-a[1]).slice(0,12).map(([k,v])=>({label:k,a:0,b:v}));
   const st={}; stock.forEach(x=>{ const k = x.location_type==="WH" ? (["INTRANSIT","VIRTUAL-PRODUCTION","VIR-STORE"].includes((x.bin||"").toUpperCase()) ? title(x.bin) : "Warehouse") : x.location_name; st[k] ??= {}; st[k][x.size||"–"]=(st[k][x.size||"–"]||0)+x.qty; });
   const stSizes = [...new Set(stock.map(x=>x.size||"–"))].sort((a,b)=>(order.indexOf(a)+1||99)-(order.indexOf(b)+1||99));
@@ -444,7 +444,9 @@ function renderAttr(){
   const since = iso(new Date(mondayOf(new Date()).getTime() - (weeks-1)*7*86400000));
   const agg = {};
   const add = (k, ch, u) => { if(!k) k="(none)"; agg[k] ??= {label:k,a:0,b:0}; if(ch==="Online") agg[k].a+=u; else agg[k].b+=u; };
-  if(dim==="location_name"){ if(!S.stores.length){ S.storesReady?.then(renderAttr); } S.stores.forEach(x => { const m=meta[`${x.style_code}|${x.colour}`]||{}; if(cat&&m.category!==cat) return; if(chan==="Online") return; add(x.location_name,"Store",+x.units); }); $("#aTitle").textContent="Units by store (all time)"; }
+  if(dim==="location_name"){
+    if(!S.storeTotals){ S.storeTotals=[]; $("#aTitle").textContent="Loading stores…"; rpc("dashboard_store_totals").then(r=>{ S.storeTotals=r; renderAttr(); }); return; }
+    S.storeTotals.forEach(x => { if(cat&&x.category!==cat) return; if(chan==="Online") return; add(x.location_name,"Store",+x.units); }); $("#aTitle").textContent="Units by store (all time)"; }
   else if(dim==="size"){ $("#aTitle").textContent="Size curve — use a style's drill-down for per-style sizes"; S.summary.forEach(()=>{}); }
   else {
     const src = weeks>=52 ? S.summary.map(x=>({...x, _a:+x.online_units||0, _b:+x.store_units||0})) : null;

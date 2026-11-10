@@ -139,7 +139,7 @@ svg text{font-family:var(--sans);font-size:11px;fill:var(--muted)}
   <section id="repl">
     <h2>Replenishment report <small>live version of the Designers Report — formula = sold ÷ days selling × lead × buffer</small></h2>
     <div class="filters">
-      <input type="search" id="rSearch" placeholder="Search style, colour, fabric…">
+      <input type="search" id="rSearch" placeholder="One or many: Bairi - Rimya - Koyal, or a colour / fabric / code" style="min-width:380px">
       <select id="rColl"><option value="">All launches</option></select>
       <select id="rCov"><option value="">Short + Covered</option><option>Short</option><option>Covered</option></select>
       <select id="rStage"><option value="">All stages</option></select>
@@ -394,9 +394,10 @@ function fillSelect(sel, vals, keep){ const cur = sel.value; sel.innerHTML = `<o
 function renderRepl(){
   fillSelect($("#rColl"), S.repl.map(r=>r.collection), "All launches");
   fillSelect($("#rStage"), S.repl.map(r=>r.production_stage), "All stages");
-  const s = $("#rSearch").value.toLowerCase(), coll=$("#rColl").value, cov=$("#rCov").value, st=$("#rStage").value;
-  let rows = S.repl.filter(r => (!coll||r.collection===coll) && (!cov||r.coverage===cov) && (!st||r.production_stage===st) &&
-    (!s || `${r.top_name} ${r.colour} ${r.fabric} ${r.style_code} ${r.collection}`.toLowerCase().includes(s)));
+  const terms = $("#rSearch").value.toLowerCase().split(/[-,|\/\n;]+/).map(t=>t.trim()).filter(Boolean), coll=$("#rColl").value, cov=$("#rCov").value, st=$("#rStage").value;
+  const rx = terms.length>1 ? terms.map(t => new RegExp(`(^|[^a-z0-9])${t.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")}([^a-z0-9]|$)`)) : null;   // list = whole-word; single = loose
+  let rows = S.repl.filter(r => { if((coll&&r.collection!==coll)||(cov&&r.coverage!==cov)||(st&&r.production_stage!==st)) return false; if(!terms.length) return true;
+    const h=`${r.top_name} ${r.colour} ${r.fabric||""} ${r.style_code} ${r.collection}`.toLowerCase(); return rx ? rx.some(x=>x.test(h)) : h.includes(terms[0]); });
   rows.sort((a,b)=> { const x=a[rSort.k], y=b[rSort.k]; return (x==null?-1e9: typeof x==="string"? x.localeCompare(y): x-y) * rSort.dir; });
   S._replRows = rows;
   $("#rCount").textContent = `${rows.length} style-colours · ${n0(rows.reduce((t,r)=>t+Math.max(0,r.shortfall),0))} pcs short in total`;

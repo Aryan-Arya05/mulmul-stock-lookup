@@ -34,10 +34,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
-          STATUS=$(curl -s "https://idhtjxirqvaensqhozdc.supabase.co/rest/v1/sync_state?job=eq.vinculum_backfill&select=status" \
-            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" | sed 's/.*"status":"\([a-z]*\)".*/\1/')
-          echo "backfill status: $STATUS"
-          if [ "$STATUS" = "paused" ] || [ "$STATUS" = "error" ]; then
-            [ "$STATUS" = "error" ] && sleep 300 || sleep 60
+          RAW=$(curl -s "https://idhtjxirqvaensqhozdc.supabase.co/rest/v1/sync_state?job=eq.vinculum_backfill&select=status" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY")
+          STATUS=$(echo "$RAW" | grep -o '"status":"[a-z]*"' | head -1 | cut -d'"' -f4)
+          echo "backfill status: ${STATUS:-unknown} ($RAW)"
+          # Anything other than a confirmed 'done' re-dispatches (unknown/error = DB was unreachable; wait and retry)
+          if [ "$STATUS" != "done" ]; then
+            [ "$STATUS" = "paused" ] && sleep 60 || sleep 300
             gh workflow run backfill-sales.yml -R ${{ github.repository }} -f budget_min=${{ inputs.budget_min || '300' }}
           fi

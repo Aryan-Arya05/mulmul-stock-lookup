@@ -111,6 +111,7 @@ async function syncReplenishment() {
     const r1 = int(r["1st Replenishment"]) || 0, r2 = int(r["2nd Replenishment"]) || 0, r3 = int(r["3rd Replenishment"]) || 0;
     out.push({
       style_code: style, colour, collection: str(r["Collection"]), fabric: str(r["Fabric Quality"]),
+      launch_month: str(r["Month"]), launch_year: int(r["Year"]), planned_qty: int(r["Original Qty Planned"]),
       top_name: str(r["Top Name"]), top_sold_sheet: int(r["Top Sold"]),
       paired_bottom: str(r["Paired Bottom"]), bottom_sold_sheet: int(r["Bottom Sold"]),
       paired_dupatta: str(r["Paired Dupatta"]), dupatta_sold_sheet: int(r["Dupattas Sold"]),

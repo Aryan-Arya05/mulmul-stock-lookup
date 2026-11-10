@@ -330,7 +330,7 @@ function renderOverview(){
   if(P){ per = {}; const key = {}; S.repl.forEach(r => key[`${r.style_code}|${r.colour}`] = r.collection);
     P.rows.forEach(r => { const c = key[`${r.style_code}|${r.colour}`]; if(!c) return; per[c] ??= {u:0,a:0,b:0}; per[c].u += +r.units; per[c].a += +r.online_units||0; per[c].b += +r.store_units||0; }); }
   $("#ovNote").textContent = `${L.length} launches tracked in the replenishment sheet${P?` · showing ${d(P.from)} – ${d(P.to)}`:""}`;
-  $("#launchCards").innerHTML = L.map(l => { const pp = per ? (per[l.collection]||{u:0,a:0,b:0}) : null; return `<div class="card">
+  $("#launchCards").innerHTML = L.map(l => { const pp = per ? (per[l.collection]||{u:0,a:0,b:0}) : null; return `<div class="card click" data-coll="${esc(l.collection)}" style="cursor:pointer">
     <div class="t"><span>${esc(l.collection)}</span><span class="muted" style="font-weight:400">${d(l.launch_date)}</span></div>
     <div class="hero num">${pp ? n0(pp.u) : n0(l.total_sold)}<small>${pp ? `units in period · ${n1(pp.u/P.days)}/day` : "units sold"}</small></div>
     <div class="kv">
@@ -339,7 +339,8 @@ function renderOverview(){
       <span>On hand</span><b class="num">${n0(l.on_hand)}</b>
       <span>Ordered + pipeline</span><b class="num">${n0(l.total_repl)} + ${n0(l.pipeline_qty)}</b>
       <span>Still short</span><b class="num ${l.total_shortfall>0?"err":""}">${n0(l.total_shortfall)} <span class="muted">(${l.styles_short}/${l.style_colours} styles)</span></b>
-    </div></div>`; }).join("") || `<div class="empty">No replenishment rows yet — the sheet sync hasn't run.</div>`;
+    </div><div class="muted" style="margin-top:8px;font-size:12px">Click for the full collection view →</div></div>`; }).join("") || `<div class="empty">No replenishment rows yet — the sheet sync hasn't run.</div>`;
+  $("#launchCards").querySelectorAll(".card.click").forEach(c => c.onclick = () => openCollection(c.dataset.coll));
   // weekly chart (all styles)
   const wk = {}; S.weekly.forEach(r => { const k=r.week_start; wk[k] ??= {label:d(k), a:0,b:0}; if(r.channel==="Online") wk[k].a+=+r.units; else wk[k].b+=+r.units; });
   $("#chWeekly").innerHTML = barsSvg(Object.keys(wk).sort().map(k=>wk[k]));
@@ -476,6 +477,51 @@ async function openDrawer(key){
       <div class="chart"><h3>Where stock is sitting</h3><div class="tw"><table><thead><tr><th>Location</th>${stSizes.map(s=>`<th class="r">${esc(s)}</th>`).join("")}<th class="r">Total</th></tr></thead><tbody>
         ${Object.entries(st).sort((a,b)=>Object.values(b[1]).reduce((x,y)=>x+y,0)-Object.values(a[1]).reduce((x,y)=>x+y,0)).map(([loc,m])=>`<tr><td>${esc(loc)}</td>${stSizes.map(s=>`<td class="r num">${m[s]||""}</td>`).join("")}<td class="r num"><b>${Object.values(m).reduce((x,y)=>x+y,0)}</b></td></tr>`).join("")||`<tr><td class="empty">No stock anywhere</td></tr>`}</tbody></table></div></div>
     </div>`;
+}
+// ---------- Collection drill-down ----------
+async function openCollection(coll){
+  const rows = S.repl.filter(r=>r.collection===coll); if(!rows.length) return;
+  const L = S.launches.find(l=>l.collection===coll) || {};
+  $("#scrim").classList.add("on"); const D=$("#drawer"); D.classList.add("on");
+  D.innerHTML = `<div class="head"><div><h2 style="margin:0">${esc(coll)}</h2><div class="muted">${rows.length} style-colours · launched ${d(L.launch_date)}${rows[0].launch_month?` · ${esc(rows[0].launch_month)} ${rows[0].launch_year||""}`:""}</div></div><button class="x" id="dx">Close</button></div><div class="loading muted" style="padding:20px">Loading…</div>`;
+  $("#dx").onclick = closeDrawer;
+  const codes = [...new Set(rows.map(r=>r.style_code))]; const inList = `style_code=in.(${codes.map(encodeURIComponent).join(",")})`;
+  const keys = new Set(rows.map(r=>`${r.style_code}|${r.colour}`));
+  const [weekly, sizes, stores] = await Promise.all([
+    q(`v_weekly_style_colour?${inList}&select=style_code,colour,week_start,channel,units&order=week_start`),
+    q(`v_size_style_colour?${inList}&select=style_code,colour,size,channel,units`),
+    q(`v_store_style_colour?${inList}&select=style_code,colour,location_name,units`),
+  ]);
+  const own = x => keys.has(`${x.style_code}|${x.colour}`);
+  const tot = rows.reduce((t,r)=>{ t.sold+=r.total_sold; t.on+=r.online_units; t.st+=r.store_units; t.oh+=r.on_hand; t.pipe+=r.pipeline_qty; t.ord+=r.total_repl; t.short+=Math.max(0,r.shortfall); t.u7+=r.units_7d; t.p7+=r.units_prev_7d; t.plan+=(+r.planned_qty||0); return t; },{sold:0,on:0,st:0,oh:0,pipe:0,ord:0,short:0,u7:0,p7:0,plan:0});
+  const wk={}; weekly.filter(own).forEach(w=>{ wk[w.week_start] ??= {label:d(w.week_start),a:0,b:0}; if(w.channel==="Online") wk[w.week_start].a+=+w.units; else wk[w.week_start].b+=+w.units; });
+  const order=["XXS","XS","S","M","L","XL","XXL","2XL","3XL","4XL","5XL","6XL"]; const sz={}; sizes.filter(own).forEach(x=>{ const k=x.size||"–"; sz[k] ??= {label:k,a:0,b:0}; if(x.channel==="Online") sz[k].a+=+x.units; else sz[k].b+=+x.units; });
+  const szRows = Object.values(sz).sort((a,b)=>(order.indexOf(a.label)+1||99)-(order.indexOf(b.label)+1||99));
+  const stM={}; stores.filter(own).forEach(x=>{ stM[x.location_name||"?"]=(stM[x.location_name||"?"]||0)+ +x.units; }); const stRows = Object.entries(stM).sort((a,b)=>b[1]-a[1]).slice(0,12).map(([k,v])=>({label:k,a:0,b:v}));
+  const byColour={}; rows.forEach(r=>{ const k=title(r.colour_label||r.colour); byColour[k] ??= {label:k,a:0,b:0}; byColour[k].a+=r.online_units; byColour[k].b+=r.store_units; }); const colRows=Object.values(byColour).sort((a,b)=>(b.a+b.b)-(a.a+a.b));
+  const byFab={}; rows.forEach(r=>{ const k=r.fabric||"(no fabric)"; byFab[k] ??= {label:k,a:0,b:0}; byFab[k].a+=r.online_units; byFab[k].b+=r.store_units; }); const fabRows=Object.values(byFab).sort((a,b)=>(b.a+b.b)-(a.a+a.b));
+  const sorted=[...rows].sort((a,b)=>b.total_sold-a.total_sold);
+  D.querySelector(".loading").outerHTML = `
+    <div class="cards" style="margin-top:12px;grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">
+      <div class="card"><div class="hero num">${n0(tot.sold)}<small>sold</small></div><div class="muted">${tot.plan?`${n1(tot.sold/tot.plan*100)}% of ${n0(tot.plan)} planned`:""}</div></div>
+      <div class="card"><div class="hero num">${n0(tot.u7)}<small>last 7d</small></div><div>${trendChip(tot.u7,tot.p7)}</div></div>
+      <div class="card"><div class="hero num">${tot.sold?Math.round(tot.on/tot.sold*100):0}%<small>online</small></div><div class="muted">${n0(tot.on)} / ${n0(tot.st)} store</div></div>
+      <div class="card"><div class="hero num">${n0(tot.oh)}<small>on hand</small></div><div class="muted">+ ${n0(tot.pipe)} pipeline</div></div>
+      <div class="card"><div class="hero num">${n0(tot.ord)}<small>ordered</small></div><div class="muted">${rows.filter(r=>r.total_repl>0).length} styles</div></div>
+      <div class="card"><div class="hero num err">${n0(tot.short)}<small>still short</small></div><div class="muted">${rows.filter(r=>r.coverage==="Short").length}/${rows.length} styles</div></div>
+    </div>
+    <div class="grid2" style="margin-top:12px">
+      <div class="chart"><h3>Units per week</h3><div class="legend"><span><i style="background:var(--online)"></i>Online</span><span><i style="background:var(--store)"></i>Store</span></div>${barsSvg(Object.keys(wk).sort().map(k=>wk[k]),{h:200})}</div>
+      <div class="chart"><h3>By colour</h3>${hbarsSvg(colRows)}</div>
+      <div class="chart"><h3>Size curve</h3>${barsSvg(szRows,{h:200})}</div>
+      <div class="chart"><h3>By fabric</h3>${hbarsSvg(fabRows)}</div>
+      <div class="chart"><h3>Top stores</h3>${hbarsSvg(stRows)}</div>
+    </div>
+    <div class="row" style="margin-top:14px"><h2 style="margin:0">Styles</h2><button class="btn right" id="collExport" type="button">Export CSV</button></div>
+    <div class="tw"><table><thead><tr><th></th><th>Style</th><th>Colour</th><th class="r">Sold</th><th class="r">7d</th><th class="r">/day</th><th class="r">On hand</th><th class="r">Pipeline</th><th class="r">Ordered</th><th class="r">Formula</th><th class="r">Shortfall</th><th>Status</th><th>Stage</th></tr></thead><tbody>${
+      sorted.map(r=>`<tr class="click" data-k="${esc(r.style_code)}|${esc(r.colour)}"><td>${r.image_url?`<img class="thumb" loading="lazy" src="${esc(r.image_url)}">`:""}</td><td><b>${esc(r.top_name)}</b></td><td>${esc(title(r.colour_label||r.colour))}</td><td class="r num">${n0(r.total_sold)}</td><td class="r num">${n0(r.units_7d)} ${trendChip(r.units_7d,r.units_prev_7d)}</td><td class="r num">${n1(r.units_per_day)}</td><td class="r num">${n0(r.on_hand)}</td><td class="r num">${n0(r.pipeline_qty)}</td><td class="r num">${n0(r.total_repl)}</td><td class="r num"><b>${n0(r.formula_qty)}</b></td><td class="r num ${r.shortfall>0?"err":""}">${r.shortfall>0?"+":""}${n0(r.shortfall)}</td><td>${covChip(r)}</td><td>${stageChip(r.production_stage)}</td></tr>`).join("")}</tbody></table></div>`;
+  D.querySelectorAll("tbody tr.click").forEach(tr => tr.onclick = () => openDrawer(tr.dataset.k));
+  $("#collExport").onclick = () => exportCsv(`mulmul-${coll.replace(/\s+/g,"-").toLowerCase()}-${stamp()}.csv`, [["top_name","Style"],["style_code","Style code"],["colour_label","Colour"],["fabric","Fabric"],["planned_qty","Planned"],["total_sold","Sold"],["sell_through_pct","Sell-through %"],["online_units","Online"],["store_units","Store"],["units_7d","Last 7d"],["units_per_day","Units/day"],["on_hand","On hand"],["pipeline_qty","Pipeline"],["total_repl","Ordered"],["formula_qty","Formula"],["shortfall","Shortfall"],["coverage","Status"],["production_stage","Stage"],["expected_delivery","Expected delivery"]], sorted);
 }
 function closeDrawer(){ $("#drawer").classList.remove("on"); $("#scrim").classList.remove("on"); }
 $("#scrim").onclick = closeDrawer;

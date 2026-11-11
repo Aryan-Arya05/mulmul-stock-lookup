@@ -84,3 +84,30 @@ create or replace view public.v_stock_aging_summary with (security_invoker = tru
 select product_type, age_bucket, sum(qty) as available_qty, sum(mrp_value) as mrp_value
 from public.v_stock_aging_layers
 group by product_type, age_bucket;
+
+-- Dashboard read access (sales/index.html, Aging tab). `stock_adjustments` stays private;
+-- these functions expose aggregates only. Applied as migration `stock_aging_dashboard_rpcs`.
+create or replace function public.dashboard_stock_aging()
+returns jsonb language sql stable security definer set search_path to 'public' as $$
+  select jsonb_build_object(
+    'summary', (select coalesce(jsonb_agg(row_to_json(t)), '[]'::jsonb) from (
+        select product_type, age_bucket, sum(qty) as qty, round(sum(mrp_value)) as mrp_value
+        from v_stock_aging_layers group by 1, 2) t),
+    'backfill', (select row_to_json(s) from (select status, detail, last_run from sync_state where job = 'stock_adjustments_backfill') s),
+    'incremental', (select row_to_json(s) from (select status, last_run from sync_state where job = 'stock_adjustments') s),
+    'stock_as_of', (select max(synced_at) from inventory),
+    'generated_at', now())
+$$;
+
+create or replace function public.dashboard_stock_aging_detail(p_type text, p_bucket text)
+returns jsonb language sql stable security definer set search_path to 'public' as $$
+  select coalesce(jsonb_agg(row_to_json(t)), '[]'::jsonb) from (
+    select style_code, product_name, colour, product_type, age_bucket,
+           sum(qty) as qty, round(sum(mrp_value)) as mrp_value,
+           count(distinct sku) as skus, min(inward_date) as oldest_inward, max(inward_date) as latest_inward
+    from v_stock_aging_layers
+    where (p_type is null or product_type = p_type) and (p_bucket is null or age_bucket = p_bucket)
+    group by 1, 2, 3, 4, 5
+    order by sum(mrp_value) desc
+    limit 5000) t
+$$;

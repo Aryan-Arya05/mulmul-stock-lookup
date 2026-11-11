@@ -110,6 +110,7 @@ svg text{font-family:var(--sans);font-size:11px;fill:var(--muted)}
     <button data-tab="products">Products</button>
     <button data-tab="attr">Attributes</button>
     <button data-tab="prod">Production</button>
+    <button data-tab="aging">Aging</button>
     <button data-tab="ask">Ask</button>
   </nav>
   <div class="fresh" id="fresh"></div>
@@ -188,6 +189,19 @@ svg text{font-family:var(--sans);font-size:11px;fill:var(--muted)}
     <div class="cards" id="prodCards"></div>
     <div class="filters" style="margin-top:12px"><select id="pColl"><option value="">All launches</option></select><select id="pStage"><option value="">All stages</option></select></div>
     <div class="tw"><table id="pTable"></table></div>
+  </section>
+
+  <section id="aging">
+    <h2>Stock aging <small>stock ages from its last replenishment at Noida, not from SKU creation · newest inward first</small></h2>
+    <div id="agNote"></div>
+    <div class="cards" id="agCards"></div>
+    <div class="filters" style="margin-top:12px">
+      <select id="agView"><option value="both">Qty + MRP value</option><option value="qty">Qty only</option><option value="mrp">MRP value only</option></select>
+      <span class="muted">Click any number for the styles behind it</span>
+      <span class="right muted" id="agAsOf"></span>
+      <button class="btn" id="agExport" type="button">Export CSV</button>
+    </div>
+    <div class="tw"><table id="agTable"><tbody><tr><td class="empty">Open this tab to load the aging report…</td></tr></tbody></table></div>
   </section>
 
   <section id="ask"><div class="ask">
@@ -637,6 +651,67 @@ async function ask(){
       <details><summary>${esc(data.title||"Query")} · ${rows.length} rows${data.note?` · ${esc(data.note)}`:""}</summary><pre>${esc(data.sql)}</pre></details>`;
   } catch(e){ box.querySelector(".a").innerHTML = `<span class="err">${esc(e.message)}</span>`; }
 }
+
+// ---------- Aging ----------
+// Stock is aged from its replenishment date: each SKU's on-hand is allocated to its production inwards
+// (Vinculum adjustments into JIT at MNW), newest first. Loaded on first open of the tab.
+const AG = { data:null, loading:false };
+const agBuckets = rows => { const ys = [...new Set(rows.map(r=>r.age_bucket))].filter(b=>/^\d{4}$/.test(b)).sort();
+  return [...(rows.some(r=>r.age_bucket==="Upto 2023")?["Upto 2023"]:[]), ...ys, ...(rows.some(r=>r.age_bucket==="No inward record")?["No inward record"]:[])]; };
+async function loadAging(){
+  if(AG.data || AG.loading) return; AG.loading = true;
+  $("#agTable").innerHTML = `<tbody><tr><td class="empty">Calculating stock aging…</td></tr></tbody>`;
+  try { AG.data = await rpc("dashboard_stock_aging"); renderAging(); }
+  catch(e){ $("#agTable").innerHTML = `<tbody><tr><td class="empty err">Could not load stock aging: ${esc(e.message)}</td></tr></tbody>`; }
+  finally { AG.loading = false; }
+}
+function renderAging(){
+  const A = AG.data; if(!A) return;
+  const rows = A.summary||[], buckets = agBuckets(rows), view = $("#agView").value;
+  const showQ = view!=="mrp", showM = view!=="qty", span = (showQ?1:0)+(showM?1:0);
+  const cell = {}, tot = {}, byType = {}; let gq=0, gm=0;
+  rows.forEach(r => { const q=+r.qty||0, m=+r.mrp_value||0;
+    cell[`${r.product_type}|${r.age_bucket}`] = {q,m};
+    (tot[r.age_bucket] ??= {q:0,m:0}).q += q; tot[r.age_bucket].m += m;
+    (byType[r.product_type] ??= {q:0,m:0}).q += q; byType[r.product_type].m += m; gq+=q; gm+=m; });
+  const types = Object.keys(byType).sort((a,b)=>a.toLowerCase().localeCompare(b.toLowerCase()));
+  // progress of the history load: until it is complete, unmatched stock shows as "No inward record"
+  const bf = A.backfill, m = (bf?.detail||"").match(/done=(\d+) of (\d+)/);
+  $("#agNote").innerHTML = bf && bf.status!=="done"
+    ? `<div class="card" style="margin-bottom:12px;border-color:var(--warn)"><b>Inward history is still loading${m?`: ${n0(m[1])} of ${n0(m[2])} SKUs`:""}.</b> <span class="muted">Stock whose history has not arrived yet sits under "No inward record", so these figures are partial${bf.status==="error"?" — the load stopped on an error and needs a re-run":""}.</span></div>` : "";
+  const pct = (a,b) => b ? `${(a/b*100).toFixed(1)}%` : "–";
+  $("#agCards").innerHTML = `<div class="card"><div class="t">Total stock</div><div class="hero num">${n0(gq)}<small>units</small></div><div class="kv"><span>MRP value</span><b class="num">₹${n0(gm)}</b><span>Product types</span><b class="num">${types.length}</b></div></div>` +
+    buckets.map(b => { const t = tot[b]||{q:0,m:0};
+      return `<div class="card"><div class="t">${esc(b)}</div><div class="hero num">${n0(t.q)}<small>units · ${pct(t.q,gq)}</small></div><div class="kv"><span>MRP value</span><b class="num">₹${n0(t.m)}</b><span>Share of value</span><b class="num">${pct(t.m,gm)}</b></div></div>`; }).join("");
+  const pair = (v, t, b) => { const k = t==null ? "" : ` class="r num agc" data-t="${esc(t)}" data-b="${esc(b??"")}" style="cursor:pointer"`, plain = ` class="r num"`;
+    const at = t==null ? plain : k; return (showQ?`<td${at}>${v&&v.q?n0(v.q):""}</td>`:"") + (showM?`<td${at}>${v&&v.m?n0(v.m):""}</td>`:""); };
+  const sub = (showQ?`<th class="r">Qty</th>`:"") + (showM?`<th class="r">MRP value</th>`:"");
+  $("#agTable").innerHTML = `<thead><tr><th rowspan="2">Product type</th>${buckets.map(b=>`<th class="r" colspan="${span}">${esc(b)}</th>`).join("")}<th class="r" colspan="${span}">Total</th></tr><tr>${buckets.map(()=>sub).join("")}${sub}</tr></thead><tbody>${
+    types.map(t => `<tr><td><b>${esc(t)}</b></td>${buckets.map(b=>pair(cell[`${t}|${b}`], t, b)).join("")}${pair(byType[t], t, "")}</tr>`).join("")
+  }<tr style="font-weight:600;background:var(--soft)"><td>Grand total</td>${buckets.map(b=>pair(tot[b], "", b)).join("")}${pair({q:gq,m:gm}, null)}</tr></tbody>`;
+  $("#agTable").querySelectorAll("td.agc").forEach(td => { if(td.textContent) td.onclick = () => openAging(td.dataset.t, td.dataset.b); });
+  $("#agAsOf").textContent = A.stock_as_of ? `Stock as of ${new Date(A.stock_as_of).toLocaleString("en-IN",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}` : "";
+  AG._export = types.map(t => { const o = { product_type:t }; buckets.forEach(b => { const c = cell[`${t}|${b}`]||{}; o[`${b}_q`] = c.q||0; o[`${b}_m`] = c.m||0; }); o.total_q = byType[t].q; o.total_m = byType[t].m; return o; });
+  AG._cols = [["product_type","Product type"], ...buckets.flatMap(b => [[`${b}_q`,`${b} - Qty`],[`${b}_m`,`${b} - MRP value`]]), ["total_q","Total Qty"],["total_m","Total MRP value"]];
+}
+async function openAging(type, bucket){
+  const label = [type||"All product types", bucket||"All years"].join(" · ");
+  $("#scrim").classList.add("on"); const D=$("#drawer"); D.classList.add("on");
+  D.innerHTML = `<div class="head"><div><h2 style="margin:0">${esc(label)}</h2><div class="muted">Loading styles…</div></div><button class="x" onclick="closeDrawer()">Close</button></div>`;
+  try {
+    const rows = await rpc("dashboard_stock_aging_detail", { p_type: type||null, p_bucket: bucket||null });
+    const q = rows.reduce((t,r)=>t+ +r.qty,0), mv = rows.reduce((t,r)=>t+ +r.mrp_value,0);
+    D.innerHTML = `<div class="head"><div><h2 style="margin:0">${esc(label)}</h2><div class="muted">${n0(rows.length)} style-colours · ${n0(q)} units · ₹${n0(mv)} at MRP${rows.length>=5000?" · showing the top 5,000 by value":""}</div></div><button class="x" onclick="closeDrawer()">Close</button></div>
+      <div class="filters" style="margin-top:12px"><button class="btn" id="agdExport" type="button">Export CSV</button></div>
+      <div class="tw"><table><thead><tr><th>Style</th><th>Colour</th>${bucket?"":`<th>Age</th>`}<th class="r">Qty</th><th class="r">MRP value</th><th class="r">SKUs</th><th>Last inward</th></tr></thead><tbody>${
+        rows.slice(0,800).map(r=>`<tr><td><b>${esc(r.product_name||r.style_code||"–")}</b> <span class="muted">${esc(r.style_code||"")}</span></td><td>${esc(title(r.colour))}</td>${bucket?"":`<td>${esc(r.age_bucket)}</td>`}<td class="r num">${n0(r.qty)}</td><td class="r num">${n0(r.mrp_value)}</td><td class="r num">${n0(r.skus)}</td><td>${r.latest_inward?d(r.latest_inward):"–"}</td></tr>`).join("")
+      }</tbody></table></div>${rows.length>800?`<div class="muted" style="margin-top:8px">Showing the top 800 by value. Export CSV has all ${n0(rows.length)}.</div>`:""}`;
+    $("#agdExport").onclick = () => exportCsv(`mulmul-aging-${label.replace(/[^a-z0-9]+/gi,"-").toLowerCase()}-${stamp()}.csv`, [["product_name","Style"],["style_code","Style code"],[r=>title(r.colour),"Colour"],["product_type","Product type"],["age_bucket","Age"],["qty","Qty"],["mrp_value","MRP value"],["skus","SKUs"],["oldest_inward","Oldest inward"],["latest_inward","Latest inward"]], rows);
+  } catch(e){ D.innerHTML = `<div class="head"><div><h2 style="margin:0">${esc(label)}</h2><div class="err">${esc(e.message)}</div></div><button class="x" onclick="closeDrawer()">Close</button></div>`; }
+}
+$("#agView").addEventListener("input", renderAging);
+$("#agExport").onclick = () => AG._export && exportCsv(`mulmul-stock-aging-${stamp()}.csv`, AG._cols, AG._export);
+document.querySelector('nav button[data-tab="aging"]').addEventListener("click", loadAging);
 
 // ---------- tabs ----------
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => { document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("on",x===b)); document.querySelectorAll("main section").forEach(s=>s.classList.toggle("on",s.id===b.dataset.tab)); location.hash=b.dataset.tab; });

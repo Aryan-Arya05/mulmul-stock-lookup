@@ -39,3 +39,9 @@ Needs the `ANTHROPIC_API_KEY` secret on the edge function (Supabase → Edge Fun
 - `from_date` / `to_date` (dd/MM/yyyy) — backfill a window (by updatedDate).
 - `sheet_sales=true` — reload the Sale Report tab into `sale_lines`.
 - `skip_vinculum=true` — sheet only.
+
+## Aging tab
+
+Product type × year, quantity and MRP value, aged from the last replenishment date (not SKU creation). Loaded on
+first open from `dashboard_stock_aging()`; clicking a number calls `dashboard_stock_aging_detail(type, bucket)` for the
+styles behind it. Inward history comes from `scripts/sync-inwards.mjs` (see the main README, "Stock aging").

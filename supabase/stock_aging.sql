@@ -127,6 +127,12 @@ returns jsonb language sql stable security definer set search_path to 'public' a
     'summary', (select coalesce(jsonb_agg(row_to_json(t)), '[]'::jsonb) from (
         select product_type, age_bucket, sum(qty) as qty, round(sum(mrp_value)) as mrp_value
         from v_stock_aging_layers group by 1, 2) t),
+    -- stock sitting in INTRANSIT bins; it is part of the totals above, shown separately for visibility
+    'intransit', (select row_to_json(t) from (
+        select coalesce(sum(i.qty), 0) as qty, coalesce(round(sum(i.qty * coalesce(p.mrp, 0))), 0) as mrp_value, count(distinct i.sku) as skus
+        from inventory i left join products p on p.sku = i.sku
+        where i.qty > 0 and upper(i.bin) = 'INTRANSIT' and i.location_code not in ('OPT', 'BNG', 'MRS')
+          and lower(coalesce(p.category, '')) not in ('bom set', 'box', 'carry bag', 'fabric', 'perfume')) t),
     'backfill', (select row_to_json(s) from (select status, detail, last_run from sync_state where job = 'stock_adjustments_backfill') s),
     'incremental', (select row_to_json(s) from (select status, last_run from sync_state where job = 'stock_adjustments') s),
     'stock_as_of', (select max(synced_at) from inventory),
@@ -144,4 +150,17 @@ returns jsonb language sql stable security definer set search_path to 'public' a
     group by 1, 2, 3, 4, 5
     order by sum(mrp_value) desc
     limit 5000) t
+$$;
+
+create or replace function public.dashboard_stock_intransit()
+returns jsonb language sql stable security definer set search_path to 'public' as $$
+  select coalesce(jsonb_agg(row_to_json(t)), '[]'::jsonb) from (
+    select p.style_code, p.product_name, p.colour, coalesce(p.category, 'Uncategorised') as product_type,
+           string_agg(distinct i.location_code, ', ') as location,
+           sum(i.qty) as qty, round(sum(i.qty * coalesce(p.mrp, 0))) as mrp_value, count(distinct i.sku) as skus
+    from inventory i left join products p on p.sku = i.sku
+    where i.qty > 0 and upper(i.bin) = 'INTRANSIT' and i.location_code not in ('OPT', 'BNG', 'MRS')
+      and lower(coalesce(p.category, '')) not in ('bom set', 'box', 'carry bag', 'fabric', 'perfume')
+    group by 1, 2, 3, 4
+    order by sum(i.qty) desc) t
 $$;

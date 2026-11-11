@@ -681,8 +681,10 @@ function renderAging(){
     ? `<div class="card" style="margin-bottom:12px;border-color:var(--warn)"><b>Inward history is still loading${m?`: ${n0(m[1])} of ${n0(m[2])} SKUs`:""}.</b> <span class="muted">Stock whose history has not arrived yet sits under "No inward record", so these figures are partial${bf.status==="error"?" — the load stopped on an error and needs a re-run":""}.</span></div>` : "";
   const pct = (a,b) => b ? `${(a/b*100).toFixed(1)}%` : "–";
   $("#agCards").innerHTML = `<div class="card"><div class="t">Total stock</div><div class="hero num">${n0(gq)}<small>units</small></div><div class="kv"><span>MRP value</span><b class="num">₹${n0(gm)}</b><span>Product types</span><b class="num">${types.length}</b></div></div>` +
+    (A.intransit ? `<div class="card" id="agTransit" style="cursor:pointer" title="Click for the styles in transit"><div class="t">In transit <span class="chip transit">in the totals</span></div><div class="hero num">${n0(A.intransit.qty)}<small>units · ${pct(+A.intransit.qty,gq)}</small></div><div class="kv"><span>MRP value</span><b class="num">₹${n0(A.intransit.mrp_value)}</b><span>SKUs</span><b class="num">${n0(A.intransit.skus)}</b></div></div>` : "") +
     buckets.map(b => { const t = tot[b]||{q:0,m:0};
       return `<div class="card"><div class="t">${esc(b)}</div><div class="hero num">${n0(t.q)}<small>units · ${pct(t.q,gq)}</small></div><div class="kv"><span>MRP value</span><b class="num">₹${n0(t.m)}</b><span>Share of value</span><b class="num">${pct(t.m,gm)}</b></div></div>`; }).join("");
+  if($("#agTransit")) $("#agTransit").onclick = openTransit;
   const pair = (v, t, b) => { const k = t==null ? "" : ` class="r num agc" data-t="${esc(t)}" data-b="${esc(b??"")}" style="cursor:pointer"`, plain = ` class="r num"`;
     const at = t==null ? plain : k; return (showQ?`<td${at}>${v&&v.q?n0(v.q):""}</td>`:"") + (showM?`<td${at}>${v&&v.m?n0(v.m):""}</td>`:""); };
   const sub = (showQ?`<th class="r">Qty</th>`:"") + (showM?`<th class="r">MRP value</th>`:"");
@@ -708,6 +710,20 @@ async function openAging(type, bucket){
       }</tbody></table></div>${rows.length>800?`<div class="muted" style="margin-top:8px">Showing the top 800 by value. Export CSV has all ${n0(rows.length)}.</div>`:""}`;
     $("#agdExport").onclick = () => exportCsv(`mulmul-aging-${label.replace(/[^a-z0-9]+/gi,"-").toLowerCase()}-${stamp()}.csv`, [["product_name","Style"],["style_code","Style code"],[r=>title(r.colour),"Colour"],["product_type","Product type"],["age_bucket","Age"],["qty","Qty"],["mrp_value","MRP value"],["skus","SKUs"],["oldest_inward","Oldest inward"],["latest_inward","Latest inward"]], rows);
   } catch(e){ D.innerHTML = `<div class="head"><div><h2 style="margin:0">${esc(label)}</h2><div class="err">${esc(e.message)}</div></div><button class="x" onclick="closeDrawer()">Close</button></div>`; }
+}
+async function openTransit(){
+  $("#scrim").classList.add("on"); const D=$("#drawer"); D.classList.add("on");
+  D.innerHTML = `<div class="head"><div><h2 style="margin:0">Stock in transit</h2><div class="muted">Loading styles…</div></div><button class="x" onclick="closeDrawer()">Close</button></div>`;
+  try {
+    const rows = await rpc("dashboard_stock_intransit");
+    const q = rows.reduce((t,r)=>t+ +r.qty,0), mv = rows.reduce((t,r)=>t+ +r.mrp_value,0);
+    D.innerHTML = `<div class="head"><div><h2 style="margin:0">Stock in transit</h2><div class="muted">${n0(rows.length)} style-colours · ${n0(q)} units · ₹${n0(mv)} at MRP · already counted in the year columns</div></div><button class="x" onclick="closeDrawer()">Close</button></div>
+      <div class="filters" style="margin-top:12px"><button class="btn" id="agtExport" type="button">Export CSV</button></div>
+      <div class="tw"><table><thead><tr><th>Style</th><th>Colour</th><th>Product type</th><th class="r">Qty</th><th class="r">MRP value</th><th class="r">SKUs</th></tr></thead><tbody>${
+        rows.map(r=>`<tr><td><b>${esc(r.product_name||r.style_code||"–")}</b> <span class="muted">${esc(r.style_code||"")}</span></td><td>${esc(title(r.colour))}</td><td>${esc(r.product_type)}</td><td class="r num">${n0(r.qty)}</td><td class="r num">${n0(r.mrp_value)}</td><td class="r num">${n0(r.skus)}</td></tr>`).join("")
+      }</tbody></table></div>`;
+    $("#agtExport").onclick = () => exportCsv(`mulmul-stock-in-transit-${stamp()}.csv`, [["product_name","Style"],["style_code","Style code"],[r=>title(r.colour),"Colour"],["product_type","Product type"],["location","Location"],["qty","Qty"],["mrp_value","MRP value"],["skus","SKUs"]], rows);
+  } catch(e){ D.innerHTML = `<div class="head"><div><h2 style="margin:0">Stock in transit</h2><div class="err">${esc(e.message)}</div></div><button class="x" onclick="closeDrawer()">Close</button></div>`; }
 }
 $("#agView").addEventListener("input", renderAging);
 $("#agExport").onclick = () => AG._export && exportCsv(`mulmul-stock-aging-${stamp()}.csv`, AG._cols, AG._export);

@@ -1,0 +1,29 @@
+name: Sync transfer details (Vinculum stoDetails, for stock in transit)
+on:
+  schedule:
+    - cron: "23 * * * *"            # hourly: shipped transfers whose detail is missing, changed or over 6 hours old
+  workflow_dispatch:
+    inputs:
+      max_orders:
+        description: "Most transfers to look up in this run (20 per API call)"
+        default: "400"
+permissions:
+  contents: read
+concurrency: { group: sto-details, cancel-in-progress: false }
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: Vinculum stoDetails -> sto_details
+        run: node scripts/sync-sto-details.mjs
+        env:
+          MAX_ORDERS: ${{ inputs.max_orders || '400' }}
+          VINCULUM_API_KEY: ${{ secrets.VINCULUM_API_KEY }}
+          VINCULUM_API_OWNER: ceo
+          VINCULUM_ORG_ID: MULM
+          SUPABASE_URL: https://idhtjxirqvaensqhozdc.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

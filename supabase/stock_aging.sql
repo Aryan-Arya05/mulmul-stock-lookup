@@ -1,11 +1,10 @@
 -- Stock aging: age on-hand stock from its replenishment (inward) date, not the SKU creation date.
 -- Applied to the Supabase project as migration `stock_aging`; kept here for reference.
 --
--- Source of inward dates: Vinculum v3/stock/adjustmentDetail at MNW, loaded by scripts/sync-inwards.mjs.
--- Production stock is received only at MNW, as a manual positive adjustment into the JIT bin
--- (remark "MEMO IS CREATING") or, occasionally, straight into a rack bin with a "MEMO ..." remark.
--- Before the JIT bin existed (2021-22) the same inward was booked into rack bins as "FOR PRODUCTION".
--- Everything else (OUTBOND add-backs, returns, alterations, store transfers) is not a fresh inward.
+-- Source of inward dates: Vinculum v3/stock/adjustmentDetail, loaded by scripts/sync-inwards.mjs.
+-- Stock enters Vinculum as a manual positive adjustment, almost all of it at MNW (Noida): into the JIT bin
+-- ("MEMO IS CREATING"), into rack bins ("OUTBOND NOT CREATED", "FOR PRODUCTION", "FOOTWEAR INCREASE", ...).
+-- The date of that adjustment is the date the stock was added. Store transfers never reset age.
 
 create table if not exists public.stock_adjustments (
   id            text primary key,              -- Vinculum adjustment id
@@ -22,15 +21,18 @@ create table if not exists public.stock_adjustments (
 create index if not exists stock_adjustments_sku_idx on public.stock_adjustments (sku, created_at desc);
 alter table public.stock_adjustments enable row level security;   -- service role only
 
--- Fresh production inwards: the rule lives here, so it can change without re-pulling history.
+-- Inward = the date stock was added at any location. Every stock-adding adjustment counts, whatever its
+-- remark (JIT / MEMO / PRODUCTION / OUTBOND / "... INCREASE" / blank), except customer returns and alterations
+-- (old units coming back), the INTRANSIT staging bin and the virtual bins.
+-- The rule lives here, so it can change without re-pulling history.
 create or replace view public.v_fresh_inwards with (security_invoker = true) as
 select id, sku, bin, qty, remarks, created_by, created_at,
        (created_at at time zone 'Asia/Kolkata')::date as inward_date
 from public.stock_adjustments
-where location_code = 'MNW'
-  and qty > 0
-  and coalesce(remarks, '') !~* 'OUT ?BO'                         -- OUTBOND add-backs are never fresh, even in JIT
-  and (upper(bin) = 'JIT' or remarks ~* 'MEMO|PRODUCTION');      -- before JIT existed (2021-22) inwards were remarked "FOR/FROM PRODUCTION"
+where qty > 0
+  and upper(bin) not like 'VIR%'
+  and upper(bin) <> 'INTRANSIT'
+  and coalesce(remarks, '') !~* 'REVERSE|RTO|RETURN|ALTER|EXCHANGE|ORDER PCS|CANCEL';
 
 -- Physical on-hand per SKU: every warehouse and store, INTRANSIT included;
 -- virtual bins (VIRTUAL, VIRTUAL-PRODUCTION, VIR-STORE), OPT and the closed stores are excluded.
@@ -42,9 +44,30 @@ where i.qty > 0
   and i.location_code not in ('OPT', 'BNG', 'MRS')
 group by i.sku;
 
--- FIFO layers: the units still on hand are assumed to be the most recently received ones,
--- so on-hand is allocated to inwards newest first. Units with no inward on record fall in
--- the 'No inward record' bucket.
+-- First sale date per SKU: fallback date for stock that has no stock-addition on record.
+-- Refreshed by refresh_stock_aging(), which scripts/sync-inwards.mjs calls after each daily run.
+create materialized view if not exists public.mv_sku_first_sale as
+select sku, min(sale_date) as first_sale from public.mv_sales where is_sale group by sku;
+create unique index if not exists mv_sku_first_sale_sku on public.mv_sku_first_sale (sku);
+grant select on public.mv_sku_first_sale to anon, authenticated, service_role;
+
+create or replace function public.refresh_stock_aging() returns void
+language plpgsql security definer set search_path to 'public' as $$
+begin
+  refresh materialized view mv_sku_first_sale;
+end $$;
+revoke execute on function public.refresh_stock_aging() from public, anon, authenticated;
+
+-- SKUs whose stock is not fully covered by a stock-addition record (targets extra history pulls).
+create or replace view public.v_stock_no_inward with (security_invoker = true) as
+select o.sku
+from public.v_stock_on_hand o
+left join (select sku, sum(qty) as qty from public.v_fresh_inwards group by sku) f using (sku)
+where o.on_hand > coalesce(f.qty, 0);
+
+-- FIFO layers: the units still on hand are assumed to be the most recently added ones, so on-hand is
+-- allocated to stock additions newest first. Units with no addition on record are dated by the SKU's
+-- first sale, then by the year in its style code, so nothing is left without a year.
 create or replace view public.v_stock_aging_layers with (security_invoker = true) as
 with inw as (
   select f.sku, f.inward_date, f.qty,
@@ -58,11 +81,19 @@ alloc as (
   join inw i using (sku)
 ),
 layers as (
-  select sku, inward_date, qty from alloc where qty > 0
+  select sku, inward_date, qty, 'Stock added'::text as date_source from alloc where qty > 0
   union all
-  select o.sku, null::date, o.on_hand - coalesce(a.qty, 0)
+  select o.sku,
+         coalesce(fs.first_sale,
+                  case when substring(o.sku from '^[A-Z]+(\d{2})\d{2}') between '15' and to_char(now(), 'YY')
+                       then make_date(2000 + substring(o.sku from '^[A-Z]+(\d{2})\d{2}')::int, 1, 1) end),
+         o.on_hand - coalesce(a.qty, 0),
+         case when fs.first_sale is not null then 'First sale'
+              when substring(o.sku from '^[A-Z]+(\d{2})\d{2}') between '15' and to_char(now(), 'YY') then 'Style code year'
+              else 'None' end
   from public.v_stock_on_hand o
   left join (select sku, sum(qty) as qty from alloc group by sku) a using (sku)
+  left join public.mv_sku_first_sale fs on fs.sku = o.sku
   where o.on_hand - coalesce(a.qty, 0) > 0
 )
 select l.sku, p.style_code, p.product_name, p.colour, p.size,
@@ -75,7 +106,8 @@ select l.sku, p.style_code, p.product_name, p.colour, p.size,
          else extract(year from l.inward_date)::int::text
        end as age_bucket,
        l.qty,
-       l.qty * coalesce(p.mrp, 0) as mrp_value
+       l.qty * coalesce(p.mrp, 0) as mrp_value,
+       l.date_source
 from layers l
 left join public.products p on p.sku = l.sku
 -- non-merchandise product types kept out of the report

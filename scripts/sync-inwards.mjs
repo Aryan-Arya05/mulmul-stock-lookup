@@ -10,10 +10,12 @@
 //   default     incremental: every adjustment since the watermark (minus TAIL_DAYS), in windows of WINDOW_DAYS
 //   BACKFILL=1  full history for every SKU that has physical stock today, 100 SKUs per call, no date filter.
 //               Resumable (cursor in sync_state job 'stock_adjustments_backfill') and time-budgeted.
+//               BACKFILL_SOURCE / BACKFILL_JOB / LOCATIONS narrow it, e.g. SKUs in v_stock_no_inward at the
+//               stores and MWH, to find where stock with no Noida record was first added.
 //   DRY_FILE=x  parse a saved API response and print the rows; calls nothing, writes nothing
 //
 // Env: VINCULUM_API_KEY, VINCULUM_API_OWNER, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
-// Optional: VINCULUM_BASE, VINCULUM_ORG_ID, LOCATIONS (default MNW), TAIL_DAYS (2), WINDOW_DAYS (6),
+// Optional: VINCULUM_BASE, VINCULUM_ORG_ID, LOCATIONS (default MNW), BACKFILL_SOURCE, BACKFILL_JOB, TAIL_DAYS (2), WINDOW_DAYS (6),
 //           BACKFILL_BUDGET_MIN (300), VINCULUM_MIN_GAP_MS (7600)
 import { readFileSync } from "node:fs";
 
@@ -157,7 +159,8 @@ const setState = (job, patch) => sb("sync_state?on_conflict=job", { method: "POS
 
 // ---------- backfill: full adjustment history for every SKU in stock ----------
 if (process.env.BACKFILL === "1") {
-  const JOB = "stock_adjustments_backfill";
+  const JOB = process.env.BACKFILL_JOB || "stock_adjustments_backfill";
+  const SOURCE = process.env.BACKFILL_SOURCE || "v_stock_on_hand";   // any view with a `sku` column, e.g. v_stock_no_inward
   const BUDGET_MS = Number(process.env.BACKFILL_BUDGET_MIN || 300) * 60000;
   const t0 = Date.now();
   const [st] = await sb(`sync_state?job=eq.${JOB}&select=*`);
@@ -166,11 +169,11 @@ if (process.env.BACKFILL === "1") {
   let done = process.env.BACKFILL_RESTART === "1" ? 0 : Number((st?.detail || "").match(/done=(\d+)/)?.[1] || 0);
   const skus = [];
   for (let off = 0; ; off += 1000) {
-    const page = await sb(`v_stock_on_hand?select=sku&order=sku&offset=${off}&limit=1000`);
+    const page = await sb(`${SOURCE}?select=sku&order=sku&offset=${off}&limit=1000`);
     page.forEach(r => skus.push(r.sku));
     if (page.length < 1000) break;
   }
-  log(`backfill: ${skus.length} SKUs in stock, resuming at ${done}; locations ${LOCATIONS.join(",")}`);
+  log(`backfill (${JOB}): ${skus.length} SKUs from ${SOURCE}, resuming at ${done}; locations ${LOCATIONS.join(",")}`);
   let written = 0;
   await setState(JOB, { status: "running", last_run: new Date().toISOString(), detail: `done=${done} of ${skus.length}` });
   try {
@@ -211,6 +214,7 @@ try {
       log(`  ${location} ${fmtIST(ws).slice(0, 10)}..${fmtIST(we).slice(0, 10)}: ${rows.length} adjustments`);
     }
   }
+  await sb("rpc/refresh_stock_aging", { method: "POST", body: {} }).catch(e => log("refresh_stock_aging failed:", e.message));
   await setState(JOB, { status: "ok", watermark: to.toISOString(), last_run: new Date().toISOString(), detail: `wrote ${written} rows; window ${fmtIST(from)} -> ${fmtIST(to)}; ${calls} calls` });
   log(`done: ${written} rows, ${calls} calls`);
 } catch (e) {

@@ -15,6 +15,15 @@ on:
       budget_min:
         description: "Backfill only: minutes to run before pausing"
         default: "300"
+      locations:
+        description: "Vinculum location codes, comma separated"
+        default: "MNW"
+      source:
+        description: "Backfill only: view that lists the SKUs to pull (v_stock_on_hand = all in stock, v_stock_no_inward = only those still undated)"
+        default: "v_stock_on_hand"
+      job:
+        description: "Backfill only: sync_state job name that tracks progress"
+        default: "stock_adjustments_backfill"
 permissions:
   actions: write
   contents: read
@@ -33,6 +42,9 @@ jobs:
           BACKFILL: ${{ inputs.backfill == true && '1' || '' }}
           BACKFILL_RESTART: ${{ inputs.restart == true && '1' || '' }}
           BACKFILL_BUDGET_MIN: ${{ inputs.budget_min || '300' }}
+          BACKFILL_SOURCE: ${{ inputs.source || 'v_stock_on_hand' }}
+          BACKFILL_JOB: ${{ inputs.job || 'stock_adjustments_backfill' }}
+          LOCATIONS: ${{ inputs.locations || 'MNW' }}
           VINCULUM_API_KEY: ${{ secrets.VINCULUM_API_KEY }}
           VINCULUM_API_OWNER: ceo
           VINCULUM_ORG_ID: MULM
@@ -44,12 +56,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
-          RAW=$(curl -s "https://idhtjxirqvaensqhozdc.supabase.co/rest/v1/sync_state?job=eq.stock_adjustments_backfill&select=status" \
+          RAW=$(curl -s "https://idhtjxirqvaensqhozdc.supabase.co/rest/v1/sync_state?job=eq.${{ inputs.job || 'stock_adjustments_backfill' }}&select=status" \
             -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY")
           STATUS=$(echo "$RAW" | grep -o '"status":"[a-z]*"' | head -1 | cut -d'"' -f4)
           echo "backfill status: ${STATUS:-unknown} ($RAW)"
           # 'paused' = budget reached, carry on. 'error' or unknown = stop and let a person look.
           if [ "$STATUS" = "paused" ]; then
             sleep 60
-            gh workflow run sync-inwards.yml -R ${{ github.repository }} -f backfill=true -f budget_min=${{ inputs.budget_min || '300' }}
+            gh workflow run sync-inwards.yml -R ${{ github.repository }} -f backfill=true -f budget_min=${{ inputs.budget_min || '300' }} -f locations=${{ inputs.locations || 'MNW' }} -f source=${{ inputs.source || 'v_stock_on_hand' }} -f job=${{ inputs.job || 'stock_adjustments_backfill' }}
           fi

@@ -1,0 +1,34 @@
+name: Backfill stock transfer orders (STO)
+# One-off / on-demand: re-reads Vinculum's order pull for a date range (by last-updated date) and stores only the
+# stock transfer orders. The regular sales sync keeps them current afterwards (3-day tail every run).
+on:
+  workflow_dispatch:
+    inputs:
+      from_date:
+        description: "From (dd/MM/yyyy), by last-updated date"
+        required: true
+      to_date:
+        description: "To (dd/MM/yyyy)"
+        required: true
+permissions:
+  contents: read
+concurrency: { group: sto-backfill, cancel-in-progress: false }
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: Vinculum order pull -> sto_orders / sto_lines
+        run: node scripts/sync-sales-vinculum.mjs
+        env:
+          STO_ONLY: "1"
+          FROM_DATE: ${{ inputs.from_date }}
+          TO_DATE: ${{ inputs.to_date }}
+          VINCULUM_API_KEY: ${{ secrets.VINCULUM_API_KEY }}
+          VINCULUM_API_OWNER: ceo
+          VINCULUM_ORG_ID: MULM
+          SUPABASE_URL: https://idhtjxirqvaensqhozdc.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

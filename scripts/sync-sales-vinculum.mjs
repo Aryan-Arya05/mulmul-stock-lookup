@@ -250,7 +250,11 @@ async function upsert(table, rows, onConflict) {
     }
   }
 }
+// STO_ONLY=1: a transfer-order backfill. Reads the same order pull but writes only sto_orders / sto_lines,
+// and leaves the sales tables and the sync watermark alone.
+const STO_ONLY = process.env.STO_ONLY === "1";
 async function setState(patch) {
+  if (STO_ONLY) return;
   await sb("sync_state?on_conflict=job", { method: "POST", body: [{ job: "vinculum_orders", ...patch }], prefer: "resolution=merge-duplicates,return=minimal" });
 }
 
@@ -378,7 +382,7 @@ try {
     }
     const rows = flatten(orders);
     await flushSto();
-    if (rows.length) {
+    if (rows.length && !STO_ONLY) {
       await upsert("sale_lines", rows, "source,order_no,sku,line_key");
       total += rows.length;
       for (const r of rows) { const d = new Date(r.order_date); if (d > maxSeen) maxSeen = d; }

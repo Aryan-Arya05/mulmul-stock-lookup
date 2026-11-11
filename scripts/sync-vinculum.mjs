@@ -209,8 +209,8 @@ try {
     const have = new Set();
     for (let i = 0; i < skusInStock.length; i += 500) {
       const chunk = skusInStock.slice(i, i + 500);
-      const got = await sb(`products?select=sku,product_name&sku=in.(${chunk.map(s => `"${s}"`).join(",")})`);
-      got.forEach(p => { if (p.product_name) have.add(p.sku); });
+      const got = await sb(`products?select=sku,product_name,mrp&sku=in.(${chunk.map(s => `"${s}"`).join(",")})`);
+      got.forEach(p => { if (p.product_name && p.mrp) have.add(p.sku); });   // no MRP = details never arrived; fetch again
     }
     need = skusInStock.filter(s => !have.has(s));
   }

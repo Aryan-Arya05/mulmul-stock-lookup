@@ -1,0 +1,55 @@
+name: Sync stock inwards (Vinculum adjustments, for stock aging)
+on:
+  schedule:
+    - cron: "37 20 * * *"            # daily 02:07 IST: adjustments since the last run
+  workflow_dispatch:
+    inputs:
+      backfill:
+        description: "Backfill full adjustment history for every SKU in stock (re-dispatches itself until done)"
+        type: boolean
+        default: false
+      restart:
+        description: "Backfill only: start again from the first SKU"
+        type: boolean
+        default: false
+      budget_min:
+        description: "Backfill only: minutes to run before pausing"
+        default: "300"
+permissions:
+  actions: write
+  contents: read
+concurrency: { group: stock-inwards, cancel-in-progress: false }
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: Vinculum adjustments -> stock_adjustments
+        run: node scripts/sync-inwards.mjs
+        env:
+          BACKFILL: ${{ inputs.backfill == true && '1' || '' }}
+          BACKFILL_RESTART: ${{ inputs.restart == true && '1' || '' }}
+          BACKFILL_BUDGET_MIN: ${{ inputs.budget_min || '300' }}
+          VINCULUM_API_KEY: ${{ secrets.VINCULUM_API_KEY }}
+          VINCULUM_API_OWNER: ceo
+          VINCULUM_ORG_ID: MULM
+          SUPABASE_URL: https://idhtjxirqvaensqhozdc.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      - name: Continue the backfill if it is not finished
+        if: ${{ always() && inputs.backfill == true }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          RAW=$(curl -s "https://idhtjxirqvaensqhozdc.supabase.co/rest/v1/sync_state?job=eq.stock_adjustments_backfill&select=status" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY")
+          STATUS=$(echo "$RAW" | grep -o '"status":"[a-z]*"' | head -1 | cut -d'"' -f4)
+          echo "backfill status: ${STATUS:-unknown} ($RAW)"
+          # 'paused' = budget reached, carry on. 'error' or unknown = stop and let a person look.
+          if [ "$STATUS" = "paused" ]; then
+            sleep 60
+            gh workflow run sync-inwards.yml -R ${{ github.repository }} -f backfill=true -f budget_min=${{ inputs.budget_min || '300' }}
+          fi

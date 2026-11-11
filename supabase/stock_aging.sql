@@ -198,20 +198,59 @@ create index if not exists sto_lines_sku_idx on public.sto_lines (sku);
 alter table public.sto_orders enable row level security;
 alter table public.sto_lines enable row level security;
 
--- from = the location that raised and ships the order, to = the receiving location (Vinculum customerCode).
--- Vinculum sends no ship date, so the order's last update is used: for a shipped order that is the dispatch.
+-- Per-shipment detail from Vinculum v2/order/stoDetails (scripts/sync-sto-details.mjs, hourly):
+-- real from/to sites, the actual ship date and the quantity received at the destination.
+-- Applied as migrations `sto_details` and `sto_in_transit_from_details`.
+create table if not exists public.sto_details (
+  order_no text not null, delivery_no text not null default '', sku text not null, line_key text not null default '1',
+  from_code text, from_name text, to_code text, to_name text, order_status text, sto_type text, delivery_status text,
+  ship_date timestamptz, pick_date timestamptz, pack_date timestamptz, transporter text, tracking_no text,
+  inbound_codes text[], order_qty numeric, shipped_qty numeric, delivery_qty numeric, received_qty numeric,
+  line_status text, raw jsonb, synced_at timestamptz not null default now(),
+  primary key (order_no, delivery_no, sku, line_key));
+create index if not exists sto_details_sku_idx on public.sto_details (sku);
+alter table public.sto_details enable row level security;
+create table if not exists public.sto_detail_fetch (
+  order_no text primary key, order_updated text, fetched_at timestamptz not null default now());
+alter table public.sto_detail_fetch enable row level security;
+
+-- Shipped transfers whose detail is missing, out of date (the order changed) or older than 6 hours.
+create or replace view public.v_sto_details_todo with (security_invoker = true) as
+select o.order_no, (f.order_no is null) as never_fetched
+from public.sto_orders o
+left join public.sto_detail_fetch f using (order_no)
+where o.status ilike '%shipped%'
+  and (f.order_no is null
+       or f.order_updated is distinct from (o.raw->>'updatedDate')
+       or f.fetched_at < now() - interval '6 hours');
+
+-- In transit = shipped from the source and not yet received at the destination.
+-- Exact where stoDetails has been fetched (ship date, shipped minus received per shipment);
+-- for a shipped transfer not looked up yet, falls back to the order pull (last update as the dispatch date).
 create or replace view public.v_sto_in_transit with (security_invoker = true) as
-select o.order_no,
-       upper(o.raw->>'orderLocation') as from_code,
-       upper(o.raw->>'customerCode') as to_code,
-       o.order_date,
-       (to_timestamp(o.raw->>'updatedDate', 'DD/MM/YYYY HH24:MI:SS')::timestamp at time zone 'Asia/Kolkata') as dispatched_at,
+select d.order_no, d.delivery_no, d.from_code, d.to_code,
+       d.ship_date as dispatched_at,
+       d.sku,
+       coalesce(d.delivery_qty, d.shipped_qty, 0) - coalesce(d.received_qty, 0) as qty,
+       d.transporter, d.tracking_no,
+       true as exact
+from public.sto_details d
+join public.sto_orders o using (order_no)
+where o.status ilike '%shipped%'
+  and d.ship_date is not null
+  and coalesce(d.delivery_qty, d.shipped_qty, 0) - coalesce(d.received_qty, 0) > 0
+union all
+select o.order_no, ''::text, upper(o.raw->>'orderLocation'), upper(o.raw->>'customerCode'),
+       (to_timestamp(o.raw->>'updatedDate', 'DD/MM/YYYY HH24:MI:SS')::timestamp at time zone 'Asia/Kolkata'),
        l.sku,
-       case when coalesce((l.raw->>'shippedQty')::numeric, 0) > 0 then (l.raw->>'shippedQty')::numeric else l.qty end as qty
+       case when coalesce((l.raw->>'shippedQty')::numeric, 0) > 0 then (l.raw->>'shippedQty')::numeric else l.qty end,
+       null::text, null::text,
+       false
 from public.sto_orders o
 join public.sto_lines l using (order_no)
 where o.status ilike '%shipped%'
-  and l.line_status ilike '%shipped%';
+  and l.line_status ilike '%shipped%'
+  and not exists (select 1 from public.sto_detail_fetch f where f.order_no = o.order_no);
 
 create or replace function public.dashboard_stock_transfers()
 returns jsonb language sql stable security definer set search_path to 'public' as $$
@@ -221,6 +260,7 @@ returns jsonb language sql stable security definer set search_path to 'public' a
            (v.dispatched_at at time zone 'Asia/Kolkata')::date as dispatched_on,
            greatest(0, floor(extract(epoch from now() - v.dispatched_at) / 86400))::int as days_in_transit,
            p.style_code, p.product_name, p.colour, coalesce(p.category, 'Uncategorised') as product_type,
+           max(v.transporter) as transporter, max(v.tracking_no) as tracking_no,
            sum(v.qty) as qty, round(sum(v.qty * coalesce(p.mrp, 0))) as mrp_value, count(distinct v.sku) as skus
     from v_sto_in_transit v
     left join products p on p.sku = v.sku

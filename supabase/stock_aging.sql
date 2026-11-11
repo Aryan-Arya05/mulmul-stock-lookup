@@ -55,6 +55,7 @@ create or replace function public.refresh_stock_aging() returns void
 language plpgsql security definer set search_path to 'public' as $$
 begin
   refresh materialized view mv_sku_first_sale;
+  refresh materialized view mv_stock_aging_layers;   -- defined further down
 end $$;
 revoke execute on function public.refresh_stock_aging() from public, anon, authenticated;
 
@@ -119,6 +120,14 @@ select product_type, age_bucket, sum(qty) as available_qty, sum(mrp_value) as mr
 from public.v_stock_aging_layers
 group by product_type, age_bucket;
 
+-- The calculation is too heavy to run on every page load (it hit the API statement timeout), so the layers
+-- are stored and refreshed: pg_cron job `refresh-stock-aging` at :14 and :44, and after each daily inward sync.
+create materialized view if not exists public.mv_stock_aging_layers as
+select * from public.v_stock_aging_layers;
+create index if not exists mv_stock_aging_layers_type_bucket on public.mv_stock_aging_layers (product_type, age_bucket);
+revoke all on public.mv_stock_aging_layers from anon, authenticated;
+-- select cron.schedule('refresh-stock-aging', '14,44 * * * *', $c$set statement_timeout = '10min'; select public.refresh_stock_aging();$c$);
+
 -- Dashboard read access (sales/index.html, Aging tab). `stock_adjustments` stays private;
 -- these functions expose aggregates only. Applied as migration `stock_aging_dashboard_rpcs`.
 create or replace function public.dashboard_stock_aging()
@@ -126,7 +135,7 @@ returns jsonb language sql stable security definer set search_path to 'public' a
   select jsonb_build_object(
     'summary', (select coalesce(jsonb_agg(row_to_json(t)), '[]'::jsonb) from (
         select product_type, age_bucket, sum(qty) as qty, round(sum(mrp_value)) as mrp_value
-        from v_stock_aging_layers group by 1, 2) t),
+        from mv_stock_aging_layers group by 1, 2) t),
     -- stock sitting in INTRANSIT bins; it is part of the totals above, shown separately for visibility
     'intransit', (select row_to_json(t) from (
         select coalesce(sum(i.qty), 0) as qty, coalesce(round(sum(i.qty * coalesce(p.mrp, 0))), 0) as mrp_value, count(distinct i.sku) as skus
@@ -145,7 +154,7 @@ returns jsonb language sql stable security definer set search_path to 'public' a
     select style_code, product_name, colour, product_type, age_bucket,
            sum(qty) as qty, round(sum(mrp_value)) as mrp_value,
            count(distinct sku) as skus, min(inward_date) as oldest_inward, max(inward_date) as latest_inward
-    from v_stock_aging_layers
+    from mv_stock_aging_layers
     where (p_type is null or product_type = p_type) and (p_bucket is null or age_bucket = p_bucket)
     group by 1, 2, 3, 4, 5
     order by sum(mrp_value) desc

@@ -4,6 +4,7 @@
 -- Source of inward dates: Vinculum v3/stock/adjustmentDetail at MNW, loaded by scripts/sync-inwards.mjs.
 -- Production stock is received only at MNW, as a manual positive adjustment into the JIT bin
 -- (remark "MEMO IS CREATING") or, occasionally, straight into a rack bin with a "MEMO ..." remark.
+-- Before the JIT bin existed (2021-22) the same inward was booked into rack bins as "FOR PRODUCTION".
 -- Everything else (OUTBOND add-backs, returns, alterations, store transfers) is not a fresh inward.
 
 create table if not exists public.stock_adjustments (
@@ -28,7 +29,8 @@ select id, sku, bin, qty, remarks, created_by, created_at,
 from public.stock_adjustments
 where location_code = 'MNW'
   and qty > 0
-  and (upper(bin) = 'JIT' or remarks ilike '%MEMO%');
+  and coalesce(remarks, '') !~* 'OUT ?BO'                         -- OUTBOND add-backs are never fresh, even in JIT
+  and (upper(bin) = 'JIT' or remarks ~* 'MEMO|PRODUCTION');      -- before JIT existed (2021-22) inwards were remarked "FOR/FROM PRODUCTION"
 
 -- Physical on-hand per SKU: every warehouse and store, INTRANSIT included;
 -- virtual bins (VIRTUAL, VIRTUAL-PRODUCTION, VIR-STORE), OPT and the closed stores are excluded.

@@ -1,7 +1,7 @@
 name: Sync sales (sheet + Vinculum orders)
 on:
   schedule:
-    - cron: "15,45 * * * *"          # every 30 min, offset from the stock sync
+    - cron: "45 2,5-13 * * *"       # IST: 08:15, then hourly 11:15–19:15 (orders sync; snapshot + sales views follow via pg_cron)
   workflow_dispatch:
     inputs:
       probe:

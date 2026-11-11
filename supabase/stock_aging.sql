@@ -142,6 +142,14 @@ returns jsonb language sql stable security definer set search_path to 'public' a
         from inventory i left join products p on p.sku = i.sku
         where i.qty > 0 and upper(i.bin) = 'INTRANSIT' and i.location_code not in ('OPT', 'BNG', 'MRS')
           and lower(coalesce(p.category, '')) not in ('bom set', 'box', 'carry bag', 'fabric', 'perfume')) t),
+    -- transfer orders dispatched and not yet received (see v_sto_in_transit below)
+    'transfers', (select row_to_json(t) from (
+        select coalesce(sum(v.qty), 0) as qty, coalesce(round(sum(v.qty * coalesce(p.mrp, 0))), 0) as mrp_value,
+               count(distinct v.order_no) as orders,
+               coalesce(max(floor(extract(epoch from now() - v.dispatched_at) / 86400)), 0)::int as oldest_days,
+               (select max(synced_at) from sto_orders) as as_of
+        from v_sto_in_transit v left join products p on p.sku = v.sku
+        where lower(coalesce(p.category, '')) not in ('bom set', 'box', 'carry bag', 'fabric', 'perfume')) t),
     'backfill', (select row_to_json(s) from (select status, detail, last_run from sync_state where job = 'stock_adjustments_backfill') s),
     'incremental', (select row_to_json(s) from (select status, last_run from sync_state where job = 'stock_adjustments') s),
     'stock_as_of', (select max(synced_at) from inventory),
@@ -172,4 +180,54 @@ returns jsonb language sql stable security definer set search_path to 'public' a
       and lower(coalesce(p.category, '')) not in ('bom set', 'box', 'carry bag', 'fabric', 'perfume')
     group by 1, 2, 3, 4
     order by sum(i.qty) desc) t
+$$;
+
+-- ---------------------------------------------------------------------------------------------------------
+-- Stock in transit: transfer orders (STO) dispatched but not yet received.
+-- sto_orders / sto_lines are filled by scripts/sync-sales-vinculum.mjs from the same order pull as sales
+-- (backfill: .github/workflows/backfill-sto.yml). Applied as migrations `sto_orders` and `sto_in_transit`;
+-- dashboard_stock_aging() above also returns a `transfers` summary built from v_sto_in_transit.
+create table if not exists public.sto_orders (
+  order_no text primary key, order_date timestamptz, status text, from_code text, to_code text, to_name text,
+  raw jsonb, synced_at timestamptz not null default now());
+create table if not exists public.sto_lines (
+  order_no text not null references public.sto_orders(order_no) on delete cascade, sku text not null,
+  line_key text not null default '1', qty numeric not null default 0, line_status text, raw jsonb,
+  synced_at timestamptz not null default now(), primary key (order_no, sku, line_key));
+create index if not exists sto_lines_sku_idx on public.sto_lines (sku);
+alter table public.sto_orders enable row level security;
+alter table public.sto_lines enable row level security;
+
+-- from = the location that raised and ships the order, to = the receiving location (Vinculum customerCode).
+-- Vinculum sends no ship date, so the order's last update is used: for a shipped order that is the dispatch.
+create or replace view public.v_sto_in_transit with (security_invoker = true) as
+select o.order_no,
+       upper(o.raw->>'orderLocation') as from_code,
+       upper(o.raw->>'customerCode') as to_code,
+       o.order_date,
+       (to_timestamp(o.raw->>'updatedDate', 'DD/MM/YYYY HH24:MI:SS')::timestamp at time zone 'Asia/Kolkata') as dispatched_at,
+       l.sku,
+       case when coalesce((l.raw->>'shippedQty')::numeric, 0) > 0 then (l.raw->>'shippedQty')::numeric else l.qty end as qty
+from public.sto_orders o
+join public.sto_lines l using (order_no)
+where o.status ilike '%shipped%'
+  and l.line_status ilike '%shipped%';
+
+create or replace function public.dashboard_stock_transfers()
+returns jsonb language sql stable security definer set search_path to 'public' as $$
+  select coalesce(jsonb_agg(row_to_json(t)), '[]'::jsonb) from (
+    select v.order_no, v.from_code, coalesce(lf.display_name, v.from_code) as from_name,
+           v.to_code, coalesce(lt.display_name, v.to_code) as to_name,
+           (v.dispatched_at at time zone 'Asia/Kolkata')::date as dispatched_on,
+           greatest(0, floor(extract(epoch from now() - v.dispatched_at) / 86400))::int as days_in_transit,
+           p.style_code, p.product_name, p.colour, coalesce(p.category, 'Uncategorised') as product_type,
+           sum(v.qty) as qty, round(sum(v.qty * coalesce(p.mrp, 0))) as mrp_value, count(distinct v.sku) as skus
+    from v_sto_in_transit v
+    left join products p on p.sku = v.sku
+    left join locations lf on lf.code = v.from_code
+    left join locations lt on lt.code = v.to_code
+    where lower(coalesce(p.category, '')) not in ('bom set', 'box', 'carry bag', 'fabric', 'perfume')
+    group by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
+    order by 7 desc, sum(v.qty) desc
+    limit 20000) t
 $$;

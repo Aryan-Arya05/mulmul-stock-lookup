@@ -681,7 +681,8 @@ function renderAging(){
     ? `<div class="card" style="margin-bottom:12px;border-color:var(--warn)"><b>Inward history is still loading${m?`: ${n0(m[1])} of ${n0(m[2])} SKUs`:""}.</b> <span class="muted">Stock whose history has not arrived yet sits under "No inward record", so these figures are partial${bf.status==="error"?" — the load stopped on an error and needs a re-run":""}.</span></div>` : "";
   const pct = (a,b) => b ? `${(a/b*100).toFixed(1)}%` : "–";
   $("#agCards").innerHTML = `<div class="card"><div class="t">Total stock</div><div class="hero num">${n0(gq)}<small>units</small></div><div class="kv"><span>MRP value</span><b class="num">₹${n0(gm)}</b><span>Product types</span><b class="num">${types.length}</b></div></div>` +
-    (A.intransit ? `<div class="card" id="agTransit" style="cursor:pointer" title="Click for the styles in transit"><div class="t">In transit <span class="chip transit">in the totals</span></div><div class="hero num">${n0(A.intransit.qty)}<small>units · ${pct(+A.intransit.qty,gq)}</small></div><div class="kv"><span>MRP value</span><b class="num">₹${n0(A.intransit.mrp_value)}</b><span>SKUs</span><b class="num">${n0(A.intransit.skus)}</b></div></div>` : "") +
+    (A.transfers || A.intransit ? (() => { const T = A.transfers||{}, B = A.intransit||{};
+      return `<div class="card" id="agTransit" style="cursor:pointer" title="Click for every transfer on the way"><div class="t">In transit <span class="chip transit">transfers on the way</span></div><div class="hero num">${n0(T.qty||0)}<small>units · ${n0(T.orders||0)} transfers</small></div><div class="kv"><span>MRP value</span><b class="num">₹${n0(T.mrp_value||0)}</b><span>Longest on the way</span><b class="num">${n0(T.oldest_days||0)} days</b><span>INTRANSIT bin (Vinculum)</span><b class="num">${n0(B.qty||0)}</b></div></div>`; })() : "") +
     buckets.map(b => { const t = tot[b]||{q:0,m:0};
       return `<div class="card"><div class="t">${esc(b)}</div><div class="hero num">${n0(t.q)}<small>units · ${pct(t.q,gq)}</small></div><div class="kv"><span>MRP value</span><b class="num">₹${n0(t.m)}</b><span>Share of value</span><b class="num">${pct(t.m,gm)}</b></div></div>`; }).join("");
   if($("#agTransit")) $("#agTransit").onclick = openTransit;
@@ -711,19 +712,46 @@ async function openAging(type, bucket){
     $("#agdExport").onclick = () => exportCsv(`mulmul-aging-${label.replace(/[^a-z0-9]+/gi,"-").toLowerCase()}-${stamp()}.csv`, [["product_name","Style"],["style_code","Style code"],[r=>title(r.colour),"Colour"],["product_type","Product type"],["age_bucket","Age"],["qty","Qty"],["mrp_value","MRP value"],["skus","SKUs"],["oldest_inward","Oldest inward"],["latest_inward","Latest inward"]], rows);
   } catch(e){ D.innerHTML = `<div class="head"><div><h2 style="margin:0">${esc(label)}</h2><div class="err">${esc(e.message)}</div></div><button class="x" onclick="closeDrawer()">Close</button></div>`; }
 }
+// In transit = transfer orders (STO) dispatched from one location and not yet received at the other.
+const TR = { rows:null, from:"", to:"" };
 async function openTransit(){
   $("#scrim").classList.add("on"); const D=$("#drawer"); D.classList.add("on");
-  D.innerHTML = `<div class="head"><div><h2 style="margin:0">Stock in transit</h2><div class="muted">Loading styles…</div></div><button class="x" onclick="closeDrawer()">Close</button></div>`;
+  D.innerHTML = `<div class="head"><div><h2 style="margin:0">Stock in transit</h2><div class="muted">Loading transfers…</div></div><button class="x" onclick="closeDrawer()">Close</button></div>`;
+  try { TR.rows = await rpc("dashboard_stock_transfers"); TR.from = TR.to = ""; renderTransit(); }
+  catch(e){ D.innerHTML = `<div class="head"><div><h2 style="margin:0">Stock in transit</h2><div class="err">${esc(e.message)}</div></div><button class="x" onclick="closeDrawer()">Close</button></div>`; }
+}
+function renderTransit(){
+  const D=$("#drawer"), all = TR.rows||[];
+  const rows = all.filter(r => (!TR.from || r.from_code===TR.from) && (!TR.to || r.to_code===TR.to));
+  const q = rows.reduce((t,r)=>t+ +r.qty,0), mv = rows.reduce((t,r)=>t+ +r.mrp_value,0), orders = new Set(rows.map(r=>r.order_no)).size;
+  const opts = (codeKey, nameKey, sel) => { const m = new Map(); all.forEach(r => m.set(r[codeKey], r[nameKey]));
+    return [...m.entries()].sort((a,b)=>String(a[1]).localeCompare(String(b[1]))).map(([c,n])=>`<option value="${esc(c)}" ${c===sel?"selected":""}>${esc(n)}${n!==c?` (${esc(c)})`:""}</option>`).join(""); };
+  const dayChip = n => `<span class="chip ${n>=7?"bad":n>=3?"warn":"good"}">${n} ${n===1?"day":"days"}</span>`;
+  D.innerHTML = `<div class="head"><div><h2 style="margin:0">Stock in transit</h2><div class="muted">${n0(orders)} transfers · ${n0(q)} units · ₹${n0(mv)} at MRP · dispatched, not yet received</div></div><button class="x" onclick="closeDrawer()">Close</button></div>
+    <div class="filters" style="margin-top:12px"><select id="trFrom"><option value="">From: all locations</option>${opts("from_code","from_name",TR.from)}</select><select id="trTo"><option value="">To: all locations</option>${opts("to_code","to_name",TR.to)}</select><button class="btn right" id="agtExport" type="button">Export CSV</button></div>
+    <div class="tw"><table><thead><tr><th>Style</th><th>Colour</th><th>From</th><th>To</th><th>In transit</th><th>Dispatched</th><th class="r">Qty</th><th class="r">MRP value</th><th>Transfer no.</th></tr></thead><tbody>${
+      rows.slice(0,600).map(r=>`<tr><td><b>${esc(r.product_name||r.style_code||"–")}</b> <span class="muted">${esc(r.style_code||"")}</span></td><td>${esc(title(r.colour))}</td><td>${esc(r.from_name)}</td><td>${esc(r.to_name)}</td><td>${dayChip(+r.days_in_transit)}</td><td>${d(r.dispatched_on)}</td><td class="r num">${n0(r.qty)}</td><td class="r num">${n0(r.mrp_value)}</td><td class="muted">${esc(r.order_no)}</td></tr>`).join("") || `<tr><td class="empty" colspan="9">No transfers on the way for this selection</td></tr>`
+    }</tbody></table></div>${rows.length>600?`<div class="muted" style="margin-top:8px">Showing the 600 longest in transit. Export CSV has all ${n0(rows.length)} rows.</div>`:""}
+    <div class="muted" style="margin-top:10px">Days are counted from the transfer's last update in Vinculum, which for a dispatched transfer is the dispatch. Vinculum's own INTRANSIT bin is a separate, manually kept quantity. <a href="#" id="trBin">See what is in that bin</a></div>`;
+  $("#trFrom").oninput = e => { TR.from = e.target.value; renderTransit(); };
+  $("#trTo").oninput = e => { TR.to = e.target.value; renderTransit(); };
+  $("#trBin").onclick = e => { e.preventDefault(); openTransitBin(); };
+  $("#agtExport").onclick = () => exportCsv(`mulmul-stock-in-transit-${stamp()}.csv`, [["order_no","Transfer no."],["from_name","From"],["from_code","From code"],["to_name","To"],["to_code","To code"],["dispatched_on","Dispatched"],["days_in_transit","Days in transit"],["product_name","Style"],["style_code","Style code"],[r=>title(r.colour),"Colour"],["product_type","Product type"],["qty","Qty"],["mrp_value","MRP value"],["skus","SKUs"]], rows);
+}
+async function openTransitBin(){
+  const D=$("#drawer");
+  D.innerHTML = `<div class="head"><div><h2 style="margin:0">INTRANSIT bin</h2><div class="muted">Loading…</div></div><button class="x" onclick="closeDrawer()">Close</button></div>`;
   try {
     const rows = await rpc("dashboard_stock_intransit");
     const q = rows.reduce((t,r)=>t+ +r.qty,0), mv = rows.reduce((t,r)=>t+ +r.mrp_value,0);
-    D.innerHTML = `<div class="head"><div><h2 style="margin:0">Stock in transit</h2><div class="muted">${n0(rows.length)} style-colours · ${n0(q)} units · ₹${n0(mv)} at MRP · already counted in the year columns</div></div><button class="x" onclick="closeDrawer()">Close</button></div>
-      <div class="filters" style="margin-top:12px"><button class="btn" id="agtExport" type="button">Export CSV</button></div>
+    D.innerHTML = `<div class="head"><div><h2 style="margin:0">INTRANSIT bin</h2><div class="muted">${n0(rows.length)} style-colours · ${n0(q)} units · ₹${n0(mv)} at MRP · quantity kept by hand in Vinculum, counted in the year columns</div></div><button class="x" onclick="closeDrawer()">Close</button></div>
+      <div class="filters" style="margin-top:12px"><button class="btn" id="trBack" type="button">← Transfers</button><button class="btn" id="agbExport" type="button">Export CSV</button></div>
       <div class="tw"><table><thead><tr><th>Style</th><th>Colour</th><th>Product type</th><th class="r">Qty</th><th class="r">MRP value</th><th class="r">SKUs</th></tr></thead><tbody>${
         rows.map(r=>`<tr><td><b>${esc(r.product_name||r.style_code||"–")}</b> <span class="muted">${esc(r.style_code||"")}</span></td><td>${esc(title(r.colour))}</td><td>${esc(r.product_type)}</td><td class="r num">${n0(r.qty)}</td><td class="r num">${n0(r.mrp_value)}</td><td class="r num">${n0(r.skus)}</td></tr>`).join("")
       }</tbody></table></div>`;
-    $("#agtExport").onclick = () => exportCsv(`mulmul-stock-in-transit-${stamp()}.csv`, [["product_name","Style"],["style_code","Style code"],[r=>title(r.colour),"Colour"],["product_type","Product type"],["location","Location"],["qty","Qty"],["mrp_value","MRP value"],["skus","SKUs"]], rows);
-  } catch(e){ D.innerHTML = `<div class="head"><div><h2 style="margin:0">Stock in transit</h2><div class="err">${esc(e.message)}</div></div><button class="x" onclick="closeDrawer()">Close</button></div>`; }
+    $("#trBack").onclick = () => TR.rows ? renderTransit() : openTransit();
+    $("#agbExport").onclick = () => exportCsv(`mulmul-intransit-bin-${stamp()}.csv`, [["product_name","Style"],["style_code","Style code"],[r=>title(r.colour),"Colour"],["product_type","Product type"],["location","Location"],["qty","Qty"],["mrp_value","MRP value"],["skus","SKUs"]], rows);
+  } catch(e){ D.innerHTML = `<div class="head"><div><h2 style="margin:0">INTRANSIT bin</h2><div class="err">${esc(e.message)}</div></div><button class="x" onclick="closeDrawer()">Close</button></div>`; }
 }
 $("#agView").addEventListener("input", renderAging);
 $("#agExport").onclick = () => AG._export && exportCsv(`mulmul-stock-aging-${stamp()}.csv`, AG._cols, AG._export);

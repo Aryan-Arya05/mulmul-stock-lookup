@@ -713,26 +713,32 @@ async function openAging(type, bucket){
   } catch(e){ D.innerHTML = `<div class="head"><div><h2 style="margin:0">${esc(label)}</h2><div class="err">${esc(e.message)}</div></div><button class="x" onclick="closeDrawer()">Close</button></div>`; }
 }
 // In transit = transfer orders (STO) dispatched from one location and not yet received at the other.
-const TR = { rows:null, from:"", to:"" };
+const TR = { rows:null, from:"", to:"", sort:"days_in_transit", dir:-1 };
+const TR_COLS = [["product_name","Style"],["colour","Colour"],["from_name","From"],["to_name","To"],["days_in_transit","In transit",1],["dispatched_on","Dispatched"],["qty","Qty",1,"r"],["mrp_value","MRP value",1,"r"],["order_no","Transfer no."]];   // [key, label, numeric, class]
 async function openTransit(){
   $("#scrim").classList.add("on"); const D=$("#drawer"); D.classList.add("on");
   D.innerHTML = `<div class="head"><div><h2 style="margin:0">Stock in transit</h2><div class="muted">Loading transfers…</div></div><button class="x" onclick="closeDrawer()">Close</button></div>`;
-  try { TR.rows = await rpc("dashboard_stock_transfers"); TR.from = TR.to = ""; renderTransit(); }
+  try { TR.rows = await rpc("dashboard_stock_transfers"); TR.from = TR.to = ""; TR.sort = "days_in_transit"; TR.dir = -1; renderTransit(); }
   catch(e){ D.innerHTML = `<div class="head"><div><h2 style="margin:0">Stock in transit</h2><div class="err">${esc(e.message)}</div></div><button class="x" onclick="closeDrawer()">Close</button></div>`; }
 }
 function renderTransit(){
   const D=$("#drawer"), all = TR.rows||[];
-  const rows = all.filter(r => (!TR.from || r.from_code===TR.from) && (!TR.to || r.to_code===TR.to));
+  const numeric = (TR_COLS.find(c=>c[0]===TR.sort)||[])[2];
+  const rows = all.filter(r => (!TR.from || r.from_code===TR.from) && (!TR.to || r.to_code===TR.to))
+    .sort((a,b) => { const x=a[TR.sort], y=b[TR.sort]; const c = numeric ? (+x||0)-(+y||0) : String(x??"").localeCompare(String(y??"")); return c*TR.dir || (+b.qty||0)-(+a.qty||0); });
   const q = rows.reduce((t,r)=>t+ +r.qty,0), mv = rows.reduce((t,r)=>t+ +r.mrp_value,0), orders = new Set(rows.map(r=>r.order_no)).size;
   const opts = (codeKey, nameKey, sel) => { const m = new Map(); all.forEach(r => m.set(r[codeKey], r[nameKey]));
     return [...m.entries()].sort((a,b)=>String(a[1]).localeCompare(String(b[1]))).map(([c,n])=>`<option value="${esc(c)}" ${c===sel?"selected":""}>${esc(n)}${n!==c?` (${esc(c)})`:""}</option>`).join(""); };
   const dayChip = n => `<span class="chip ${n>=7?"bad":n>=3?"warn":"good"}">${n} ${n===1?"day":"days"}</span>`;
   D.innerHTML = `<div class="head"><div><h2 style="margin:0">Stock in transit</h2><div class="muted">${n0(orders)} transfers · ${n0(q)} units · ₹${n0(mv)} at MRP · dispatched, not yet received</div></div><button class="x" onclick="closeDrawer()">Close</button></div>
     <div class="filters" style="margin-top:12px"><select id="trFrom"><option value="">From: all locations</option>${opts("from_code","from_name",TR.from)}</select><select id="trTo"><option value="">To: all locations</option>${opts("to_code","to_name",TR.to)}</select><button class="btn right" id="agtExport" type="button">Export CSV</button></div>
-    <div class="tw"><table><thead><tr><th>Style</th><th>Colour</th><th>From</th><th>To</th><th>In transit</th><th>Dispatched</th><th class="r">Qty</th><th class="r">MRP value</th><th>Transfer no.</th></tr></thead><tbody>${
+    <div class="tw"><table><thead><tr>${TR_COLS.map(c=>`<th class="${c[3]||""}" data-sort="${c[0]}" title="Click to sort">${c[1]}${TR.sort===c[0]?(TR.dir<0?" ▼":" ▲"):""}</th>`).join("")}</tr></thead><tbody>${
       rows.slice(0,600).map(r=>`<tr><td><b>${esc(r.product_name||r.style_code||"–")}</b> <span class="muted">${esc(r.style_code||"")}</span></td><td>${esc(title(r.colour))}</td><td>${esc(r.from_name)}</td><td>${esc(r.to_name)}</td><td>${dayChip(+r.days_in_transit)}</td><td>${d(r.dispatched_on)}</td><td class="r num">${n0(r.qty)}</td><td class="r num">${n0(r.mrp_value)}</td><td class="muted" title="${esc([r.transporter,r.tracking_no].filter(Boolean).join(" · "))}">${esc(r.order_no)}</td></tr>`).join("") || `<tr><td class="empty" colspan="9">No transfers on the way for this selection</td></tr>`
-    }</tbody></table></div>${rows.length>600?`<div class="muted" style="margin-top:8px">Showing the 600 longest in transit. Export CSV has all ${n0(rows.length)} rows.</div>`:""}
+    }</tbody></table></div>${rows.length>600?`<div class="muted" style="margin-top:8px">Showing the first 600 in this order. Export CSV has all ${n0(rows.length)} rows.</div>`:""}
     <div class="muted" style="margin-top:10px">Days are counted from the ship date in Vinculum, and quantity is shipped minus received at the destination. Vinculum's own INTRANSIT bin is a separate, manually kept quantity. <a href="#" id="trBin">See what is in that bin</a></div>`;
+  D.querySelectorAll("th[data-sort]").forEach(th => th.onclick = () => { const k = th.dataset.sort, num = (TR_COLS.find(c=>c[0]===k)||[])[2];
+    if(TR.sort===k) TR.dir = -TR.dir; else { TR.sort = k; TR.dir = num ? -1 : 1; }   // numbers start high to low, text A to Z
+    renderTransit(); });
   $("#trFrom").oninput = e => { TR.from = e.target.value; renderTransit(); };
   $("#trTo").oninput = e => { TR.to = e.target.value; renderTransit(); };
   $("#trBin").onclick = e => { e.preventDefault(); openTransitBin(); };

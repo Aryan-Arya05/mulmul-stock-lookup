@@ -77,7 +77,9 @@ select l.sku, p.style_code, p.product_name, p.colour, p.size,
        l.qty,
        l.qty * coalesce(p.mrp, 0) as mrp_value
 from layers l
-left join public.products p on p.sku = l.sku;
+left join public.products p on p.sku = l.sku
+-- non-merchandise product types kept out of the report
+where lower(coalesce(p.category, '')) not in ('bom set', 'box', 'carry bag', 'fabric', 'perfume');
 
 -- The report: product type x year bucket, quantity and MRP value.
 create or replace view public.v_stock_aging_summary with (security_invoker = true) as

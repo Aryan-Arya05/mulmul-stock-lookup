@@ -133,12 +133,61 @@ function parseVinDate(s) {
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
+// Stock transfer orders arrive in the same pull. They are never sales, but they say what is moving between
+// locations, so they are kept in sto_orders / sto_lines (see flushSto) for the dashboard's in-transit view.
+const stoBuf = { orders: new Map(), lines: new Map() };
+function captureSto(o, orderNo) {
+  const items = pick(o, "items", "orderItems", "lineItems") || [];
+  const header = Object.fromEntries(Object.entries(o).filter(([k]) => !["items", "orderItems", "lineItems"].includes(k)));
+  const explicit = pick(o, "status", "orderStatus", "orderStatusDesc");
+  let status = explicit ? String(explicit).trim() : "";
+  if (!status && items.length) {
+    const counts = {};
+    for (const it of items) { const st = String(pick(it, "status", "itemStatus") || "").trim(); if (st) counts[st] = (counts[st] || 0) + 1; }
+    status = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || "";
+  }
+  const now = new Date().toISOString();
+  stoBuf.orders.set(orderNo, {
+    order_no: orderNo,
+    order_date: parseVinDate(pick(o, "orderDate", "order_date", "createdDate")),
+    status: status || null,
+    from_code: String(pick(o, "fulfillmentLocCode", "fulfillmentLocation", "orderLocation", "order_Location", "locCode") || "").trim().toUpperCase() || null,
+    to_code: String(pick(o, "customerCode", "customer_code", "toLocation", "deliveryLocation", "shipToCode") || "").trim().toUpperCase() || null,
+    to_name: String(pick(o, "customerName", "shipName", "shipToName", "deliveryLocationName") || "").trim() || null,
+    raw: header, synced_at: now,
+  });
+  for (const it of items) {
+    const sku = String(pick(it, "skuCode", "sku", "skucode") || "").trim().toUpperCase();
+    if (!sku) continue;
+    const internal = pick(it, "internalLineNo", "internalLineNumber", "lineId", "lineno", "lineNo");
+    const key = internal !== undefined ? String(internal) : "1";
+    stoBuf.lines.set(`${orderNo}|${sku}|${key}`, {
+      order_no: orderNo, sku, line_key: key,
+      qty: Math.max(0, Number(pick(it, "qty", "quantity", "orderQty") || 0) - Number(pick(it, "cancelledQty") || 0)),
+      line_status: String(pick(it, "status", "itemStatus") || "").trim() || null,
+      raw: it, synced_at: now,
+    });
+  }
+}
+// Never let transfer capture break the sales sync.
+async function flushSto() {
+  if (!stoBuf.orders.size) return;
+  const orders = [...stoBuf.orders.values()], lines = [...stoBuf.lines.values()];
+  stoBuf.orders.clear(); stoBuf.lines.clear();
+  try {
+    await upsert("sto_orders", orders, "order_no");
+    if (lines.length) await upsert("sto_lines", lines, "order_no,sku,line_key");
+    log(`  transfers: ${orders.length} STO orders, ${lines.length} lines`);
+  } catch (e) { log("WARNING: could not save transfer orders:", e.message.slice(0, 200)); }
+}
+
 function flatten(orders) {
   const rows = [];
   for (const o of orders) {
     const orderNo = String(pick(o, "orderNo", "orderNumber", "OrderNo") || "").trim();
     if (!orderNo) continue;
     const orderType = String(pick(o, "orderType") || "SO").trim().toUpperCase();
+    if (orderType === "STO") captureSto(o, orderNo);
     if (orderType !== "SO") continue;                                        // STO = internal transfer, never a sale
     if (EXCLUDED_PREFIXES.some(p => orderNo.toUpperCase().startsWith(p))) continue;
     const items = pick(o, "items", "orderItems", "lineItems") || [];
@@ -292,6 +341,7 @@ if (process.env.BACKFILL === "1") {
       const we = new Date(cursor.getTime() - 1000), ws = new Date(cursor.getTime() - WINDOW_DAYS * 86400000);
       const orders = await fetchWindow(ws, we);
       const rows = flatten(orders);
+      await flushSto();
       if (rows.length) await upsert("sale_lines", rows, "source,order_no,sku,line_key");
       empties = orders.length ? 0 : empties + 1;
       total += rows.length; windows++;
@@ -327,6 +377,7 @@ try {
       if (totalPages ? page >= totalPages : list.length < PAGE_SIZE) break;
     }
     const rows = flatten(orders);
+    await flushSto();
     if (rows.length) {
       await upsert("sale_lines", rows, "source,order_no,sku,line_key");
       total += rows.length;

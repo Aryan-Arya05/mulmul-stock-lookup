@@ -19,9 +19,11 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 let lastCall = 0;
 const MIN_GAP_MS = Number(process.env.VINCULUM_MIN_GAP_MS || 1000);
 const formStyle = new Set();   // endpoints that rejected JSON (415) and want RequestBody as form field
+const formAuth = new Set();    // endpoints that answered "Invalid API credentials" (11) to header auth and want ApiOwner/ApiKey as form fields
 async function vin(path, body, attempt = 1) {
   const json = JSON.stringify(body);
-  const asForm = formStyle.has(path);
+  const authInForm = formAuth.has(path);
+  const asForm = formStyle.has(path) || authInForm;
   const wait = lastCall + MIN_GAP_MS - Date.now();
   if (wait > 0) await sleep(wait);
   lastCall = Date.now();
@@ -38,7 +40,8 @@ async function vin(path, body, attempt = 1) {
       "Content-Type": asForm ? "application/x-www-form-urlencoded" : "application/json",
       Accept: "application/json",
     },
-    body: asForm ? new URLSearchParams({ RequestBody: json }).toString() : json,
+    body: authInForm ? new URLSearchParams({ RequestBody: json, ApiOwner: VINCULUM_API_OWNER, ApiKey: VINCULUM_API_KEY }).toString()
+      : asForm ? new URLSearchParams({ RequestBody: json }).toString() : json,
     });
   } catch (e) {
     if (attempt < 4) { log(`vinculum ${path} attempt ${attempt}: ${e.name} ${e.message}; retrying`); await sleep(5000 * attempt); return vin(path, body, attempt + 1); }
@@ -48,6 +51,7 @@ async function vin(path, body, attempt = 1) {
   const text = await r.text();
   let data;
   try { data = JSON.parse(text); } catch { data = null; }
+  if (data && Number(data.responseCode) === 11 && !authInForm) { formAuth.add(path); log(`${path}: header auth rejected (11), retrying with credentials as form fields`); return vin(path, body, attempt); }
   if (data && Number(data.responseCode) === 1105) return { ...data, response: [], hasMore: false }; // "No Record Found" = empty page
   if (data && Number(data.responseCode) === 13) {                                                   // "API Hit Quota Exceeded"
     if (attempt > 6) throw new Error(`Vinculum ${path}: quota exceeded, gave up after ${attempt - 1} waits`);

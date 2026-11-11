@@ -214,6 +214,9 @@ try {
     }
     need = skusInStock.filter(s => !have.has(s));
   }
+  // also retry any product still without an MRP (new launches whose details never arrived), wherever its stock sits
+  const noMrp = await sb("products?select=sku&mrp=is.null&limit=1000").catch(() => []);
+  need = [...new Set([...need, ...noMrp.map(p => p.sku)])];
   log(`SKU details to fetch: ${need.length}`);
   let skuWarn = null;
   if (need.length) {

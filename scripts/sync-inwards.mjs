@@ -106,7 +106,8 @@ async function vin(body, attempt = 1) {
   let data = null;
   try { data = JSON.parse(text); } catch {}
   const code = data ? Number(data.responseCode) : NaN;
-  if (code === 1105) return { skuList: [], totalPages: 0 };                  // "No Record Found"
+  // "No Record Found": 1105 on most endpoints, 9 on this one (9 is otherwise the generic retryable error)
+  if (code === 1105 || /no record/i.test(String(data?.responseMessage || ""))) return { skuList: [], totalPages: 0 };
   if ((code === 10058 || r.status === 415) && styleIdx < STYLES.length - 1) {
     log(`style "${style}" rejected (${r.status} / ${code}); trying "${STYLES[styleIdx + 1]}"`);
     styleIdx++;

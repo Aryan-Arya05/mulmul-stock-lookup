@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       budget_min:
-        description: "Minutes to run before pausing (job re-dispatches itself until history is exhausted)"
+        description: "Minutes to run before pausing (job re-dispatches itself at night until history is exhausted)"
         default: "300"
 permissions:
   actions: write
@@ -38,8 +38,10 @@ jobs:
             -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY")
           STATUS=$(echo "$RAW" | grep -o '"status":"[a-z]*"' | head -1 | cut -d'"' -f4)
           echo "backfill status: ${STATUS:-unknown} ($RAW)"
-          # Anything other than a confirmed 'done' re-dispatches (unknown/error = DB was unreachable; wait and retry)
-          if [ "$STATUS" != "done" ]; then
+          # Night window only (20:30–06:30 IST = 15:00–01:00 UTC) so the backfill never competes with daytime syncs;
+          # pg_cron job 'sales-backfill-nightly' starts it again at 20:30 IST. Anything other than a confirmed 'done' re-dispatches.
+          H=$(date -u +%H)
+          if [ "$STATUS" != "done" ] && { [ "$H" -ge 15 ] || [ "$H" -lt 1 ]; }; then
             [ "$STATUS" = "paused" ] && sleep 60 || sleep 300
             gh workflow run backfill-sales.yml -R ${{ github.repository }} -f budget_min=${{ inputs.budget_min || '300' }}
           fi

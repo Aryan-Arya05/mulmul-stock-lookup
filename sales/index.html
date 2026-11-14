@@ -275,7 +275,7 @@ function renderFresh(){
   const v = S.sync.find(s=>s.job==="vinculum_orders"), sh = S.sync.find(s=>s.job==="sheet_replenishment"), ss = S.sync.find(s=>s.job==="sheet_sales");
   const rep = S.repl[0]?.report_date, stock = S.repl.find(r=>r.on_hand>0);
   const ago = t => t ? `${Math.round((Date.now()-new Date(t))/60000)} min ago` : "never";
-  const vs = v ? (v.status==="ok" ? ago(v.last_run) : `retrying · last ok ${ago(v.watermark)}`) : "not yet";
+  const vs = v ? (v.status==="ok" ? ago(v.last_run) : `${v.status==="running"?"running now":"retrying"} · last ok ${ago(v.watermark)}`) : "not yet";
   $("#fresh").innerHTML = `<span>Sales to <b>${d(rep)}</b></span><span>Orders sync <b>${vs}</b></span><span>Sheet <b>${sh?ago(sh.last_run):"never"}</b></span>${S.generatedAt?`<span>Snapshot <b>${ago(S.generatedAt)}</b></span>`:""}`;
 }
 

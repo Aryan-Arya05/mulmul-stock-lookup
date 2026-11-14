@@ -368,21 +368,33 @@ if (process.env.BACKFILL === "1") {
 await setState({ status: "running", last_run: new Date().toISOString(), detail: `window ${fmtIST(from)} -> ${fmtIST(to)}` });
 try {
   let total = 0, maxSeen = from;
+  const skippedDays = [];
+  async function pullWindow(ws, we) {   // all pages of [ws, we]; on persistent Vinculum errors split to single days and skip only those
+    try {
+      const orders = [];
+      for (let page = 1; page <= MAX_PAGES_PER_WINDOW; page++) {
+        const payload = await vin(ENDPOINT, buildBody(ws, we, page));
+        const list = payload._empty ? [] : findOrders(payload);
+        log(`  ${fmtIST(ws).slice(0, 10)}..${fmtIST(we).slice(0, 10)} page ${page}: ${list.length} orders`);
+        if (!list.length) break;
+        orders.push(...list);
+        const totalPages = Number(payload.totalPages || 0);
+        if (totalPages ? page >= totalPages : list.length < PAGE_SIZE) break;
+      }
+      return orders;
+    } catch (e) {
+      const span = we.getTime() - ws.getTime();
+      if (span <= 86400000) { log(`  SKIP ${fmtIST(ws).slice(0, 10)}: ${e.message.slice(0, 120)}`); skippedDays.push(fmtIST(ws).slice(0, 10)); return []; }
+      const mid = new Date(ws.getTime() + Math.max(86400000, Math.floor(span / 2 / 86400000) * 86400000));
+      log(`  window ${fmtIST(ws).slice(0, 10)}..${fmtIST(we).slice(0, 10)} failed (${e.message.slice(0, 60)}); splitting`);
+      return [...await pullWindow(ws, new Date(mid.getTime() - 1000)), ...await pullWindow(mid, we)];
+    }
+  }
   for (let ws = new Date(from); ws < to; ws = new Date(ws.getTime() + WINDOW_DAYS * 86400000)) {
     const we = new Date(Math.min(to.getTime(), ws.getTime() + WINDOW_DAYS * 86400000 - 1000));
-    const orders = [];
-    for (let page = 1; page <= MAX_PAGES_PER_WINDOW; page++) {
-      const payload = await vin(ENDPOINT, buildBody(ws, we, page));
-      const list = payload._empty ? [] : findOrders(payload);
-      log(`  ${fmtIST(ws).slice(0, 10)}..${fmtIST(we).slice(0, 10)} page ${page}: ${list.length} orders`);
-      if (!list.length) break;
-      orders.push(...list);
-      const totalPages = Number(payload.totalPages || 0);
-      if (totalPages ? page >= totalPages : list.length < PAGE_SIZE) break;
-    }
+    const orders = await pullWindow(ws, we);
     const rows = flatten(orders);
-    await flushSto();
-    if (rows.length && !STO_ONLY) {
+    if (rows.length) {
       await upsert("sale_lines", rows, "source,order_no,sku,line_key");
       total += rows.length;
       for (const r of rows) { const d = new Date(r.order_date); if (d > maxSeen) maxSeen = d; }
@@ -390,7 +402,7 @@ try {
     await setState({ detail: `written ${total} lines; through ${fmtIST(we)}` });
   }
   // Watermark = end of the window actually fetched (status-update time), not max order date.
-  await setState({ status: "ok", watermark: to.toISOString(), last_run: new Date().toISOString(), detail: `wrote ${total} lines; window ${fmtIST(from)} -> ${fmtIST(to)}` });
+  await setState({ status: "ok", watermark: to.toISOString(), last_run: new Date().toISOString(), detail: `wrote ${total} lines; window ${fmtIST(from)} -> ${fmtIST(to)}${skippedDays.length ? `; skipped days: ${skippedDays.join(",")}` : ""}` });
   await fetch(`${SUPABASE_URL}/functions/v1/publish-snapshot`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).catch(e => log("snapshot publish skipped:", e.message));
   log(`done: ${total} lines; views refreshed`);
 } catch (e) {

@@ -1,7 +1,7 @@
 name: Sync sales (sheet + Vinculum orders)
 on:
   schedule:
-    - cron: "45 2,5-13 * * *"       # IST: 08:15, then hourly 11:15–19:15 (orders sync; snapshot + sales views follow via pg_cron)
+    - cron: "50 2,5-13 * * *"       # backstop only — the reliable trigger is pg_cron job 'sales-sync' (trigger_github_workflow) at 08:15 IST and hourly 11:15–19:15 IST
   workflow_dispatch:
     inputs:
       probe:
@@ -24,10 +24,6 @@ on:
         description: "Skip the Vinculum order pull (sheet only)"
         type: boolean
         default: false
-      chain:
-        description: "Re-dispatch itself after 20 min (keeps the sync running on time; cron is only a backstop)"
-        type: boolean
-        default: true
 permissions:
   actions: write
   contents: read
@@ -58,10 +54,3 @@ jobs:
           PROBE: ${{ inputs.probe == true && '1' || '' }}
           FROM_DATE: ${{ inputs.from_date }}
           TO_DATE: ${{ inputs.to_date }}
-      - name: Keep the sync alive (re-dispatch in 20 min)
-        if: ${{ always() && inputs.probe != true && inputs.from_date == '' && inputs.chain != false }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          sleep 1200
-          gh workflow run sync-sales.yml -R ${{ github.repository }} -f chain=true || echo "dispatch failed; cron will restart the chain"

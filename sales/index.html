@@ -92,6 +92,7 @@ svg text{font-family:var(--sans);font-size:11px;fill:var(--muted)}
 .ans{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin:12px 0}
 .ans .q{color:var(--muted);font-size:12px;margin-bottom:6px}
 .ans .a{font-size:15px;line-height:1.5;margin-bottom:10px}
+.ans .md p{margin:6px 0}.ans .md ul{margin:4px 0 8px 18px;padding:0}.ans .md li{margin:3px 0}.ans .md b{font-weight:600}
 .ans details{font-size:12px;color:var(--muted);margin-top:8px}
 .ans pre{white-space:pre-wrap;font-family:var(--mono);font-size:11px;background:var(--soft);padding:8px;border-radius:8px}
 .err{color:var(--bad)}
@@ -627,28 +628,34 @@ function renderProd(){
 ["pColl","pStage"].forEach(id => $("#"+id).addEventListener("input", renderProd));
 
 // ---------- Ask ----------
-const SUGG = ["Which styles are selling faster this week than last week?","Top 10 kurtas by units in the last 14 days, online vs store","Which colour is doing best across the Karwachauth launch?","Which stores sold the most Festive Drop 1 pieces?","What are we most short on after replenishment?","Which fabric sells best per day since launch?","Which sizes are running out for Yaira Kurta Fuschia?","How many days of cover does each replenished style have?"];
+function md(t){ // minimal markdown: **bold**, bullets, paragraphs
+  const lines = esc(t||"").replace(/\*\*(.+?)\*\*/g,"<b>$1</b>").split("\n"); let out="", inList=false;
+  for(const l of lines){ const m=l.match(/^\s*[-•*]\s+(.*)/); if(m){ if(!inList){ out+="<ul>"; inList=true; } out+=`<li>${m[1]}</li>`; } else { if(inList){ out+="</ul>"; inList=false; } if(l.trim()) out+=`<p>${l}</p>`; } }
+  if(inList) out+="</ul>"; return out;
+}
+const SUGG = ["Which styles should we replenish first, and how many pieces?","Is the store distribution of Maru Kurta right? What should we move where?","Which styles are selling faster this week than last week, and is it sustainable?","Which colours and sizes are breaking in Festive Drop 1?","Which stores are over-stocked on Karwachauth styles vs their sales?","What sold through fastest in the last 90 days and is it still available?","Compare Festive Drop 1 vs Festive Drop 2 by rate since launch","Which fabric performs best per day since launch across launches?"];
 const hist = [];
 function renderSugg(){ $("#sugg").innerHTML = SUGG.map(s=>`<button type="button">${esc(s)}</button>`).join(""); $("#sugg").querySelectorAll("button").forEach(b=>b.onclick=()=>{ $("#askIn").value=b.textContent; ask(); }); }
 $("#askForm").onsubmit = e => { e.preventDefault(); ask(); };
 async function ask(){
   const question = $("#askIn").value.trim(); if(!question) return;
-  const box = document.createElement("div"); box.className="ans"; box.innerHTML = `<div class="q">${esc(question)}</div><div class="a muted">Thinking…</div>`;
+  const box = document.createElement("div"); box.className="ans"; box.innerHTML = `<div class="q">${esc(question)}</div><div class="a muted">Investigating — running queries, this takes 20–60 s…</div>`;
   $("#answers").prepend(box); $("#askIn").value="";
   try {
     const r = await fetch(ASK_URL, { method:"POST", headers:{ "Content-Type":"application/json", apikey:SUPABASE_KEY, Authorization:`Bearer ${SUPABASE_KEY}` }, body: JSON.stringify({ question, history: hist.slice(-4) }) });
     const data = await r.json();
     if(data.error){ box.innerHTML = `<div class="q">${esc(question)}</div><div class="a err">${esc(data.error)}</div>${data.sql?`<details><summary>SQL</summary><pre>${esc(data.sql)}</pre></details>`:""}`; return; }
-    hist.push({role:"user",content:question},{role:"assistant",content:`${data.title}: ${data.answer}`});
+    hist.push({role:"user",content:question},{role:"assistant",content:data.answer});
     const rows = data.rows||[], cols = rows.length?Object.keys(rows[0]):[];
     let chart = "";
     if(data.chart && data.chart.type && data.chart.type!=="none" && rows.length>1 && data.chart.x && data.chart.y?.length){
       const y0=data.chart.y[0], y1=data.chart.y[1]; const dd = rows.slice(0,30).map(r=>({label:String(r[data.chart.x]).slice(0,22), a:+r[y0]||0, b:y1?+r[y1]||0:0}));
       chart = `<div class="chart" style="margin:8px 0"><h3>${esc(y1?`${y0} · ${y1}`:y0)} by ${esc(data.chart.x)}</h3>${data.chart.type==="line"||rows.length>12?barsSvg(dd,{h:200}):hbarsSvg(dd)}</div>`;
     }
-    box.innerHTML = `<div class="q">${esc(question)}</div><div class="a">${esc(data.answer)}</div>${chart}
-      <div class="tw" style="max-height:360px"><table><thead><tr>${cols.map(c=>`<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${rows.map(r=>`<tr>${cols.map(c=>`<td class="${typeof r[c]==="number"?"r num":""}">${typeof r[c]==="number"?Number.isInteger(r[c])?n0(r[c]):n1(r[c]):esc(r[c]??"")}</td>`).join("")}</tr>`).join("")}</tbody></table></div>
-      <details><summary>${esc(data.title||"Query")} · ${rows.length} rows${data.note?` · ${esc(data.note)}`:""}</summary><pre>${esc(data.sql)}</pre></details>`;
+    const qs = data.queries||[];
+    box.innerHTML = `<div class="q">${esc(question)}</div><div class="a md">${md(data.answer)}</div>${chart}
+      ${rows.length?`<div class="muted" style="font-size:12px;margin:6px 0 4px">${esc(data.title||"")} · ${rows.length} rows</div><div class="tw" style="max-height:360px"><table><thead><tr>${cols.map(c=>`<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${rows.map(r=>`<tr>${cols.map(c=>`<td class="${typeof r[c]==="number"?"r num":""}">${typeof r[c]==="number"?Number.isInteger(r[c])?n0(r[c]):n1(r[c]):esc(r[c]??"")}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`:""}
+      <details><summary>${qs.length} quer${qs.length===1?"y":"ies"} run · ${Math.round((data.ms||0)/1000)} s</summary>${qs.map(q=>`<div style="margin:6px 0"><b>${esc(q.title||"")}</b> <span class="muted">· ${q.error?"error":q.row_count+" rows"}</span><pre>${esc(q.sql)}</pre></div>`).join("")}</details>`;
   } catch(e){ box.querySelector(".a").innerHTML = `<span class="err">${esc(e.message)}</span>`; }
 }
 

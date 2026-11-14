@@ -1,12 +1,14 @@
-// "Ask anything" for the Mulmul sales dashboard.
-// question -> Claude writes one read-only SQL over the analytical views -> run_dashboard_query() ->
-// rows + a short written answer + a chart hint. Secrets: ANTHROPIC_API_KEY (set in Supabase edge secrets).
+// "Ask anything" for the Mulmul sales dashboard — analyst mode.
+// The model investigates with several read-only SQL queries (run_sql tool, up to MAX_STEPS), then writes a
+// structured answer: headline, what the data shows (with numbers), recommendation, caveats.
+// Secrets: ANTHROPIC_API_KEY. Optional: ANTHROPIC_MODEL (default claude-sonnet-5-5).
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
 const MODEL = Deno.env.get("ANTHROPIC_MODEL") ?? "claude-sonnet-5-5";
+const MAX_STEPS = 8;
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -38,66 +40,72 @@ async function schemaText() {
 }
 
 const SEMANTICS = `
-You write PostgreSQL for the Mulmul (premium Indian ethnic womenswear) sales dashboard. Only these views exist:
+You are the merchandising analyst for Mulmul (premium Indian ethnic womenswear; ~26 stores + online in India/USA/UAE). You answer
+questions by investigating the data with SQL (run_sql), then giving a decisive, numbers-backed answer with a recommendation.
 
-v_sales — one row per sold order line. Filter is_sale = true for units sold (false = cancelled/returned/pending).
-  channel is 'Online' or 'Store'; location_code/location_name identify the store for Store sales (NULL for online).
-  style_code (e.g. WW2601) + colour (UPPERCASE, e.g. 'RED', 'MATCHA GREEN') identify a style-colour. product_name e.g. 'Bairi Kurta'.
-  category: Kurta, Pant, Chunni (dupatta), Saree, Lehenga, BLAZAR (waistcoat), SHOES... size: XS,S,M,L,XL,XXL,3XL or kids '4/5'.
-  sale_date (date, IST), week_start (Monday). net_value is INR (online USD/AED storefronts carry their own currency).
-  Top/bottom/dupatta of one set are separate style codes: kurta WW2601, pant WWP2601, dupatta WWD2601 — same number, letter P/D inserted.
-v_weekly_style_colour / v_daily_style_colour — pre-aggregated units by week/day, style, colour, channel.
-v_style_colour_summary — all-time totals per style-colour with collection & fabric (only replenished styles have collection/fabric).
-v_store_style_colour — units per store per style-colour. v_size_style_colour — size curve.
-v_stock_style_colour — current stock per style-colour: store_on_hand, wh_on_hand, intransit, in_production (manual 'virtual production' bin), vir_store.
-v_stock_sku — stock per SKU per location/bin.
-v_replenishment_formula — THE replenishment report, one row per replenished style-colour (the kurta/top):
-  collection (launch name e.g. 'Karwachauth Drop 1'), fabric, total_sold, first_sale, days_selling, units_per_day,
-  formula_qty = total_sold / days_selling * lead_days(60) * buffer(1.5)  (projected need),
-  on_hand, pipeline_qty, total_repl (qty already ordered), after_repl_total = on_hand + total_repl,
-  shortfall = formula_qty - after_repl_total (positive = need to make more), coverage 'Short'|'Covered', days_of_cover,
-  units_7d vs units_prev_7d (trend), online_units/store_units,
-  production_stage ('No replenishment','Ordered','Fabric / Embroidery','Cutting / Stitching','Delivered','Overdue' = past expected delivery but stock still in production), emb_fabric_date, cutting_date,
-  expected_delivery, days_in_production, days_to_delivery, image_url.
-v_launch_summary — totals per collection/launch.
-settings — production_lead_days, buffer_multiplier. locations — store master (code, display_name, city, type).
+DATA (PostgreSQL views; only these exist):
+v_sales — one row per order line, Jan 2020 → today. is_sale=true = sold (false = cancelled/returned). channel 'Online'|'Store';
+  location_code/location_name = store (NULL online). style_code (WW2601) + colour (UPPERCASE) = a style-colour; product_name 'Bairi Kurta'.
+  category: Kurta, Pant, Chunni(dupatta), Saree, Lehenga, BLAZAR, SHOES…  size XS…3XL / kids '4/5'. sale_date (IST), week_start (Mon).
+  segment: Classic/Festive/Kids/Bottom/Dupatta… net_value INR (unit price only on 2026+ lines). Sets: kurta WW2601, pant WWP2601, dupatta WWD2601.
+v_daily_style_colour / v_weekly_style_colour — units by day/week, style, colour, channel (fast; prefer these for trends).
+v_style_colour_summary — all-time per style-colour: units, online/store, orders, first/last sale, category, segment, collection, fabric.
+v_store_style_colour — all-time units per store per style-colour.    v_size_style_colour — units per size per style-colour per channel.
+v_stock_style_colour — CURRENT stock per style-colour: store_on_hand, wh_on_hand, intransit, in_production, vir_store.
+v_stock_sku — CURRENT stock per SKU per location (location_name, location_type 'Store'|'WH', bin, size, qty)  → use for store-wise distribution.
+v_replenishment_formula — the replenishment report (only styles the team put in the replenishment sheet): collection, fabric, planned_qty,
+  total_sold, sell_through_pct (sold/planned), first_sale, days_selling, units_per_day, units_7d vs units_prev_7d, online/store units,
+  formula_qty = units_per_day × 60-day lead × 1.5 buffer, on_hand, pipeline_qty, total_repl (ordered), after_repl_total, shortfall
+  (formula − after_repl), coverage Short|Covered, days_of_cover, production_stage, expected_delivery, image_url.
+v_launch_summary — totals per collection. v_monthly_channel — units by month × channel × category. settings, locations (store master).
 
-ALWAYS answer by calling the run_sql tool with one query — never reply in prose without calling it.
-Rules: one SELECT only, no CTE-less semicolons, max 200 rows (add LIMIT), ORDER BY something meaningful.
-Match names case-insensitively with ILIKE '%name%'. "This week" = current ISO week; "last week" = previous Monday-Sunday.
-When comparing styles, prefer rate metrics (units_per_day, units_7d) over raw totals when launch dates differ, and say so.
-Use CURRENT_DATE for today. Round numerics. Never reference tables that are not listed.`;
+BUSINESS RULES / DEFINITIONS the team uses:
+- Sell-through % = sold ÷ (sold + current on hand) when there is no planned qty; = sold ÷ planned when planned_qty exists. Say which you used.
+- Replenish when: formula_qty > on_hand + ordered (shortfall > 0) AND the style is still selling (units_7d > 0, trend not collapsing).
+  Urgency = days_of_cover (on_hand ÷ daily rate) vs the 60-day production lead: < 30 days = urgent, 30–60 = order now, > 60 = can wait.
+- Store distribution check: compare each store's share of CURRENT stock vs its share of SALES for that style (last 8–12 weeks and all-time);
+  days of cover per store = store on hand ÷ store daily rate. Over-stocked = high stock share, low sales share, cover > 60 days;
+  starved = sales share ≫ stock share or 0 on hand with recent sales. Recommend concrete transfers (from → to, qty) and warehouse top-ups.
+- Size curve: compare size share of sales vs size share of on hand; sizes that sold ≥15% but have 0–1 left are broken sizes → flag.
+- Compare launches by rate (units/day since first sale), not raw totals, when launch dates differ.
+- "This week" = current ISO week (Mon–today, partial); last week = previous Mon–Sun. Normalise partial weeks to per-day when comparing.
+
+HOW TO WORK:
+1. Plan 2–5 queries that answer the question properly (overview → breakdown → stock/cover → trend). Run them with run_sql.
+2. If a query returns 0 rows or looks wrong, do NOT conclude "no data": run a diagnostic (min/max date, distinct values, ILIKE on the name) and fix the filter.
+3. Use CURRENT_DATE. Match names with ILIKE '%name%'. One SELECT per call, LIMIT ≤ 200, ORDER BY meaningfully. Round numbers.
+4. Then STOP calling tools and write the answer in this exact markdown shape:
+**Answer** — one or two sentences, a clear verdict (yes/no/which ones), no hedging.
+**What the data shows** — 3–7 bullets, each with the key numbers (units, %, days of cover, dates).
+**Recommendation** — specific actions: what to replenish/transfer/stop, quantities, from→to, priority order.
+**Caveats** — 1–3 bullets only where they matter (small counts, partial week, missing planned qty, data to 'sales to' date).
+Mark the ONE query whose rows the reader should see as the main table with show_table=true (usually the breakdown).`;
 
 const TOOL = {
   name: "run_sql",
-  description: "Run one read-only SQL query against the dashboard views and show the result.",
+  description: "Run one read-only SQL SELECT against the dashboard views. Returns up to 200 rows (first 60 are echoed back to you).",
   input_schema: {
     type: "object",
     properties: {
-      title: { type: "string", description: "Short title for the result, e.g. 'Top 10 kurtas by units, last 2 weeks'" },
+      title: { type: "string", description: "What this query answers, e.g. 'Maru Kurta: stock vs sales share by store (12 wks)'" },
       sql: { type: "string" },
-      chart: {
-        type: "object",
-        description: "Optional chart hint when the result is a series or ranking",
-        properties: { type: { type: "string", enum: ["bar", "line", "none"] }, x: { type: "string" }, y: { type: "array", items: { type: "string" } } },
-      },
-      note: { type: "string", description: "One line on assumptions made (date range, what counts as 'better')." },
+      show_table: { type: "boolean", description: "true for the one result the reader should see as the main table" },
+      chart: { type: "object", description: "Optional chart hint for the main table", properties: { type: { type: "string", enum: ["bar", "line", "none"] }, x: { type: "string" }, y: { type: "array", items: { type: "string" } } } },
     },
     required: ["title", "sql"],
   },
 };
 
-async function claude(messages: unknown[], system: string, tools?: unknown[], tool_choice?: unknown, max_tokens = 1500) {
+async function claude(messages: unknown[], system: string, max_tokens = 2500) {
   const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-    body: JSON.stringify({ model: MODEL, max_tokens, system, messages, ...(tools ? { tools, tool_choice } : {}) }),
+    body: JSON.stringify({ model: MODEL, max_tokens, system, messages, tools: [TOOL], tool_choice: { type: "auto" } }),
   });
   const data = await r.json();
   if (!r.ok) throw new Error(`Anthropic ${r.status}: ${JSON.stringify(data).slice(0, 400)}`);
   return data;
 }
-
 async function runSql(sql: string) {
   return await sb("rpc/run_dashboard_query", { method: "POST", body: JSON.stringify({ q: sql, max_rows: 200 }) });
 }
@@ -108,47 +116,41 @@ Deno.serve(async (req) => {
   if (!ANTHROPIC_API_KEY) return json({ error: "ANTHROPIC_API_KEY is not set in the edge function secrets" }, 500);
   let body: { question?: string; history?: { role: string; content: string }[] };
   try { body = await req.json(); } catch { return json({ error: "bad json" }, 400); }
-  const question = (body.question ?? "").trim().slice(0, 1000);
+  const question = (body.question ?? "").trim().slice(0, 1500);
   if (!question) return json({ error: "question required" }, 400);
 
+  const t0 = Date.now();
   try {
     const system = `${SEMANTICS}\n\nToday is ${new Date().toISOString().slice(0, 10)}.\n\nSchema:\n${await schemaText()}`;
-    const history = (body.history ?? []).slice(-6).map(h => ({ role: h.role === "assistant" ? "assistant" : "user", content: String(h.content).slice(0, 2000) }));
+    const history = (body.history ?? []).slice(-6).map(h => ({ role: h.role === "assistant" ? "assistant" : "user", content: String(h.content).slice(0, 3000) }));
     const messages: unknown[] = [...history, { role: "user", content: question }];
+    const queries: { title: string; sql: string; rows: unknown[]; row_count: number; error?: string; show_table?: boolean; chart?: unknown }[] = [];
+    let answer = "";
 
-    // 1) write SQL
-    let resp = await claude(messages, system, [TOOL], { type: "auto" });
-    let call = resp.content.find((c: { type: string }) => c.type === "tool_use");
-    if (!call) {
-      const text = resp.content.filter((c: { type: string }) => c.type === "text").map((c: { text: string }) => c.text).join("\n");
-      return json({ title: "Answer", answer: text || "I could not turn that into a query — try rephrasing with a style, period or metric.", sql: null, rows: [], row_count: 0 });
-    }
-    let input = call?.input ?? {};
-    let rows: unknown[] = [];
-    let error: string | null = null;
-    try { rows = await runSql(input.sql); } catch (e) { error = String((e as Error).message); }
-
-    // 2) one repair attempt if Postgres rejected it
-    if (error) {
+    for (let step = 0; step < MAX_STEPS + 1; step++) {
+      const resp = await claude(messages, system);
+      const calls = resp.content.filter((c: { type: string }) => c.type === "tool_use");
+      const text = resp.content.filter((c: { type: string }) => c.type === "text").map((c: { text: string }) => c.text).join("\n").trim();
+      if (!calls.length || step === MAX_STEPS) { answer = text; break; }
       messages.push({ role: "assistant", content: resp.content });
-      messages.push({ role: "user", content: [{ type: "tool_result", tool_use_id: call.id, content: `SQL error: ${error}. Fix the query.`, is_error: true }] });
-      resp = await claude(messages, system, [TOOL], { type: "auto" });
-      call = resp.content.find((c: { type: string }) => c.type === "tool_use");
-      input = call?.input ?? input;
-      error = null;
-      try { rows = await runSql(input.sql); } catch (e) { error = String((e as Error).message); }
+      const results: unknown[] = [];
+      for (const call of calls) {
+        const input = call.input ?? {};
+        let rows: unknown[] = [], error: string | undefined;
+        try { rows = await runSql(input.sql); } catch (e) { error = String((e as Error).message).slice(0, 500); }
+        queries.push({ title: input.title, sql: input.sql, rows, row_count: rows.length, error, show_table: !!input.show_table, chart: input.chart ?? null });
+        results.push({ type: "tool_result", tool_use_id: call.id, is_error: !!error,
+          content: error ? `SQL error: ${error}` : `${rows.length} rows${rows.length > 60 ? " (first 60 shown)" : ""}: ${JSON.stringify(rows.slice(0, 60))}` });
+      }
+      messages.push({ role: "user", content: results });
     }
-    if (error) return json({ error: `Could not answer: ${error}`, sql: input.sql, title: input.title }, 200);
-
-    // 3) short written answer from the rows
-    const sample = JSON.stringify(rows.slice(0, 60));
-    const summary = await claude(
-      [{ role: "user", content: `Question: ${question}\nQuery note: ${input.note ?? ""}\nRows (${rows.length} total, first 60 shown): ${sample}\n\nAnswer the question in 2-5 sentences for a merchandising team: lead with the finding, cite the key numbers, flag caveats (e.g. different launch dates, small counts). No markdown headers.` }],
-      "You are a concise retail analyst for Mulmul. Plain prose, numbers inline.",
-      undefined, undefined, 500,
-    );
-    const answer = summary.content.filter((c: { type: string }) => c.type === "text").map((c: { text: string }) => c.text).join("\n").trim();
-    return json({ title: input.title, answer, sql: input.sql, chart: input.chart ?? null, note: input.note ?? null, rows, row_count: rows.length });
+    if (!answer) answer = "I ran out of steps before finishing — try a narrower question.";
+    const main = queries.filter(q => !q.error && q.rows.length).sort((a, b) => Number(b.show_table) - Number(a.show_table))[0];
+    return json({
+      answer, title: main?.title ?? null, sql: main?.sql ?? null, rows: main?.rows ?? [], row_count: main?.row_count ?? 0, chart: main?.chart ?? null,
+      queries: queries.map(q => ({ title: q.title, sql: q.sql, row_count: q.row_count, error: q.error })),
+      steps: queries.length, ms: Date.now() - t0, model: MODEL,
+    });
   } catch (e) {
     return json({ error: String((e as Error).message) }, 500);
   }

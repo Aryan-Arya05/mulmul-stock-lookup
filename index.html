@@ -493,9 +493,9 @@ async function showCompare(styles, colour, size) {
 }
 
 /* ---------- browse a location by size / colour / category ---------- */
-let browseState = null;
+let browseState = null, browseRunId = 0;
 async function browse() {
-  browseState = browseState || { loc: myStores.length ? "MINE" : "ALL", size: "", colour: "", category: "" };
+  browseState = browseState || { loc: myStores.length ? "MINE" : "ALL", size: "", colour: "", category: "", q: "" };
   currentStyle = null; lastSearch = ""; location.hash = "";
   const storeLocs = locations.filter(l => l.type === "Store").map(l => l.code);
   const locs = browseState.loc === "ALL" ? storeLocs : browseState.loc === "MINE" ? (myStores.length ? myStores : storeLocs) : [browseState.loc];
@@ -508,22 +508,26 @@ async function browse() {
   const opts = (kind, cur, label) => `<option value="">${label}</option>` + facets.filter(f => f.kind === kind).sort((a,b) => kind === "size" ? sizeIdx(a.value)-sizeIdx(b.value) : b.n-a.n).map(f => `<option value="${esc(f.value)}" ${f.value===cur?"selected":""}>${esc(f.value)} (${f.n})</option>`).join("");
   main.innerHTML = `<div class="browse">
     <div class="bar"><span class="n">Browsing ${esc(names)}</span><button type="button" class="chip" id="browseClose">Close</button></div>
+    <input id="bQ" type="search" autocomplete="off" placeholder="Search in ${esc(names)}… (name, style or SKU)" value="${esc(browseState.q||"")}" style="width:100%;box-sizing:border-box;margin:8px 0 6px;padding:10px 12px;border:1px solid var(--line,#ddd);border-radius:10px;font-size:15px">
     <div class="sel">
       <select id="bLoc" class="cat">${locOpts}</select>
       <select id="bSize">${opts("size", browseState.size, "Any size")}</select>
       <select id="bColour">${opts("colour", browseState.colour, "Any colour")}</select>
       <select id="bCat" class="cat">${opts("category", browseState.category, "Any category")}</select>
     </div>
-    <div id="bList"><div class="hint">Pick a size, colour or category to list what ${esc(names)} ha${browseState.loc!=="ALL" && locs.length===1 ? "s" : "ve"}.</div></div>
+    <div id="bList"><div class="hint">Type a product name, or pick a size, colour or category to list what ${esc(names)} ha${browseState.loc!=="ALL" && locs.length===1 ? "s" : "ve"}.</div></div>
   </div>`;
   const run = async () => {
-    browseState = { loc: browseState.loc, size: $("#bSize").value, colour: $("#bColour").value, category: $("#bCat").value };
-    if (!browseState.size && !browseState.colour && !browseState.category) { $("#bList").innerHTML = `<div class="hint">Pick a size, colour or category to list what ${esc(names)} ha${locs.length===1 ? "s" : "ve"}.</div>`; return; }
+    browseState = { loc: browseState.loc, size: $("#bSize").value, colour: $("#bColour").value, category: $("#bCat").value, q: $("#bQ").value.trim() };
+    if (!browseState.size && !browseState.colour && !browseState.category && !browseState.q) { $("#bList").innerHTML = `<div class="hint">Type a product name, or pick a size, colour or category to list what ${esc(names)} ha${locs.length===1 ? "s" : "ve"}.</div>`; return; }
+    const myRun = ++browseRunId;
     $("#bList").innerHTML = `<div class="spin">Loading…</div>`;
     try {
-      const rows = await api("rpc/browse_styles", { method: "POST", body: JSON.stringify({ locs, f_size: browseState.size || null, f_colour: browseState.colour || null, f_category: browseState.category || null, lim: 300 }) });
-      if (!rows.length) { $("#bList").innerHTML = `<div class="hint"><b>Nothing matches</b>Try a different size or colour.</div>`; return; }
+      const rows = await api("rpc/browse_styles", { method: "POST", body: JSON.stringify({ locs, f_size: browseState.size || null, f_colour: browseState.colour || null, f_category: browseState.category || null, lim: 300, q: browseState.q || null }) });
+      if (myRun !== browseRunId) return;
+      if (!rows.length) { $("#bList").innerHTML = `<div class="hint"><b>Nothing matches</b>${browseState.q ? `No product matching “${esc(browseState.q)}” is in stock at ${esc(names)}.` : "Try a different size or colour."}</div>`; return; }
       const thumbs = await thumbsFor(rows.map(r => r.style_code));
+      if (myRun !== browseRunId) return;
       $("#bList").innerHTML = `<div class="bar"><span class="n">${rows.length} style${rows.length===1?"":"s"} · ${rows.reduce((a,r)=>a+Number(r.qty),0)} pcs</span></div><div class="results">` + rows.map(r => {
         const th = thumbs[r.style_code];
         return `<button type="button" class="row browse-row" data-style="${esc(r.style_code)}">${th ? `<img class="thumb" src="${esc(th)}" alt="" loading="lazy">` : ""}<div class="name">${esc(r.product_name||r.style_code)}<small>${esc(r.style_code)}${r.category ? " · " + esc(r.category) : ""}</small><span class="meta">${browseState.size ? "" : "Sizes: " + esc(r.sizes||"") + " · "}${browseState.colour ? "" : esc(r.colours||"")}</span></div><span class="qty ${r.qty > 5 ? "ok" : "low"}">${r.qty} pcs</span></button>`;
@@ -531,9 +535,11 @@ async function browse() {
     } catch (e) { $("#bList").innerHTML = `<div class="err">${esc(e.message)}</div>`; }
   };
   ["#bSize","#bColour","#bCat"].forEach(id => $(id).onchange = run);
-  $("#bLoc").onchange = () => { browseState = { ...browseState, loc: $("#bLoc").value, size: $("#bSize").value, colour: $("#bColour").value, category: $("#bCat").value }; browse(); };
+  let qT; $("#bQ").oninput = () => { clearTimeout(qT); qT = setTimeout(run, 250); };
+  $("#bQ").onkeydown = e => { if (e.key === "Enter") { clearTimeout(qT); run(); $("#bQ").blur(); } };
+  $("#bLoc").onchange = () => { browseState = { ...browseState, loc: $("#bLoc").value, size: $("#bSize").value, colour: $("#bColour").value, category: $("#bCat").value, q: $("#bQ").value.trim() }; browse(); };
   $("#browseClose").onclick = () => { browseState = null; home(); };
-  if (browseState.size || browseState.colour || browseState.category) run();
+  if (browseState.size || browseState.colour || browseState.category || browseState.q) run();
 }
 
 /* ---------- SKU lookup (from scan) ---------- */

@@ -6,7 +6,7 @@
 const VIN_BASE = process.env.VINCULUM_BASE || "https://mulmul.vineretail.com/RestWS/api/eretail";
 const { VINCULUM_API_KEY, VINCULUM_API_OWNER, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = process.env;
 for (const k of ["VINCULUM_API_KEY", "VINCULUM_API_OWNER", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"]) if (!process.env[k]) { console.error(`Missing env ${k}`); process.exit(1); }
-const GAP_MS = Number(process.env.GAP_MS || 3000), BUDGET_MS = Number(process.env.BUDGET_MIN || 52) * 60000, CHUNK = Number(process.env.CHUNK || 100);
+const GAP_MS = Number(process.env.GAP_MS || 1200), BUDGET_MS = Number(process.env.BUDGET_MIN || 52) * 60000, CHUNK = Number(process.env.CHUNK || 20);
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const t0 = Date.now();

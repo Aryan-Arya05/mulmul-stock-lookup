@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       budget_min: { description: "Minutes to run", default: "52" }
-      gap_ms: { description: "Pause between Vinculum calls (ms)", default: "3000" }
+      gap_ms: { description: "Pause between Vinculum calls (ms)", default: "1200" }
 concurrency: { group: verify-stores, cancel-in-progress: false }
 jobs:
   verify:
@@ -20,4 +20,4 @@ jobs:
           SUPABASE_URL: https://idhtjxirqvaensqhozdc.supabase.co
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           BUDGET_MIN: ${{ inputs.budget_min || '52' }}
-          GAP_MS: ${{ inputs.gap_ms || '3000' }}
+          GAP_MS: ${{ inputs.gap_ms || '1200' }}

@@ -111,6 +111,7 @@ svg text{font-family:var(--sans);font-size:11px;fill:var(--muted)}
     <button data-tab="products">Products</button>
     <button data-tab="attr">Attributes</button>
     <button data-tab="prod">Production</button>
+    <button data-tab="inwards">Inwards</button>
     <button data-tab="aging">Aging</button>
     <button data-tab="ask">Ask</button>
   </nav>
@@ -183,6 +184,26 @@ svg text{font-family:var(--sans);font-size:11px;fill:var(--muted)}
       <button class="btn right" id="aExport" type="button">Export CSV</button>
     </div>
     <div class="grid2"><div class="chart"><h3 id="aTitle"></h3><div class="legend"><span><i style="background:var(--online)"></i>Online</span><span><i style="background:var(--store)"></i>Store</span></div><div id="chAttr"></div></div><div class="tw"><table id="aTable"></table></div></div>
+  </section>
+
+  <section id="inwards">
+    <h2>Received from production <small>stock added at Noida (JIT) — and where it has gone since</small></h2>
+    <div class="filters">
+      <select id="inPreset"><option value="1">Yesterday</option><option value="0">Today</option><option value="7" selected>Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="custom">Custom…</option></select>
+      <input type="date" id="inFrom"><span class="muted">to</span><input type="date" id="inTo">
+      <button class="btn" id="inApply" type="button">Apply</button>
+      <input type="search" id="inSearch" placeholder="Style, colour, code…" style="min-width:240px">
+      <select id="inCat"><option value="">All categories</option></select>
+      <select id="inStatus"><option value="">All</option><option value="done">Fully distributed</option><option value="part">Partly distributed</option><option value="none">Still at Noida</option></select>
+      <span class="right muted" id="inNote"></span>
+      <button class="btn" id="inExport" type="button">Export CSV</button>
+    </div>
+    <div class="cards" id="inCards"></div>
+    <div class="grid2" style="margin-top:12px">
+      <div class="chart"><h3>Units received per day</h3><div class="legend"><span><i style="background:var(--online)"></i>Sent to stores / sold online</span><span><i style="background:var(--store)"></i>Still at Noida</span></div><div id="chInwards"></div></div>
+      <div class="chart"><h3>Received by category</h3><div id="chInCat"></div></div>
+    </div>
+    <div class="tw" style="margin-top:12px"><table id="inTable"><tbody><tr><td class="empty">Loading…</td></tr></tbody></table></div>
   </section>
 
   <section id="prod">
@@ -626,6 +647,73 @@ function renderProd(){
   $("#pTable").querySelectorAll("tr.click").forEach(tr => tr.onclick = () => openDrawer(tr.dataset.k));
 }
 ["pColl","pStage"].forEach(id => $("#"+id).addEventListener("input", renderProd));
+
+// ---------- Inwards (received from production) ----------
+function inRange(){ const v=$("#inPreset").value; const today=new Date(); today.setHours(0,0,0,0);
+  if(v==="custom") return [$("#inFrom").value, $("#inTo").value];
+  if(v==="0") return [fmtD(today), fmtD(today)];
+  if(v==="1"){ const y=new Date(today.getTime()-86400000); return [fmtD(y), fmtD(y)]; }
+  return [fmtD(new Date(today.getTime()-(+v-1)*86400000)), fmtD(today)]; }
+$("#inPreset").onchange = () => { if($("#inPreset").value!=="custom"){ const [a,b]=inRange(); $("#inFrom").value=a; $("#inTo").value=b; loadInwards(); } };
+$("#inApply").onclick = loadInwards;
+["inSearch","inCat","inStatus"].forEach(id => $("#"+id).addEventListener("input", renderInwards));
+async function loadInwards(){
+  const [from,to]=inRange(); if(!from||!to) return;
+  $("#inNote").textContent="Loading…"; $("#inTable").innerHTML=`<tbody><tr><td class="empty">Loading…</td></tr></tbody>`;
+  try { S.inwards = await rpc("dashboard_inwards",{d_from:from,d_to:to}); S.inRange=[from,to]; renderInwards(); }
+  catch(e){ $("#inTable").innerHTML=`<tbody><tr><td class="empty err">${esc(e.message)}</td></tr></tbody>`; }
+}
+function inStatusOf(r){ const out=r.sent_to_stores+r.sold_online; return out>=r.received ? "done" : out>0 ? "part" : "none"; }
+function renderInwards(){
+  const rows0 = S.inwards||[]; if(!S.inRange) return;
+  fillSelect($("#inCat"), rows0.map(r=>r.category), "All categories");
+  const q=$("#inSearch").value.toLowerCase().trim(), cat=$("#inCat").value, st=$("#inStatus").value;
+  const rows = rows0.filter(r => (!cat||r.category===cat) && (!st||inStatusOf(r)===st) && (!q || `${r.product_name} ${r.colour} ${r.style_code}`.toLowerCase().includes(q)));
+  const tot = rows.reduce((t,r)=>{ t.rec+=+r.received; t.sent+=+r.sent_to_stores; t.online+=+r.sold_online; t.pick+=+r.in_picking; t.rem+=+r.remaining; return t; },{rec:0,sent:0,online:0,pick:0,rem:0});
+  const [from,to]=S.inRange; $("#inNote").textContent = `${d(from)} – ${d(to)} · ${rows.length} style-colours`;
+  $("#inCards").innerHTML = `
+    <div class="card"><div class="hero num">${n0(tot.rec)}<small>pcs received</small></div><div class="muted">${rows.length} style-colours · ${new Set(rows.map(r=>r.inward_date)).size} receipt days</div></div>
+    <div class="card"><div class="hero num">${n0(tot.sent)}<small>sent to stores</small></div><div class="muted">${tot.rec?Math.round(tot.sent/tot.rec*100):0}% of received</div></div>
+    <div class="card"><div class="hero num">${n0(tot.online)}<small>sold online from Noida</small></div><div class="muted">${tot.rec?Math.round(tot.online/tot.rec*100):0}%</div></div>
+    <div class="card"><div class="hero num ${tot.rem>0?"err":""}">${n0(tot.rem)}<small>still to distribute</small></div><div class="muted">${n0(tot.pick)} being picked · ${rows.filter(r=>inStatusOf(r)==="none").length} styles untouched</div></div>`;
+  const byDay={}; rows.forEach(r=>{ byDay[r.inward_date] ??= {label:d(r.inward_date),a:0,b:0}; byDay[r.inward_date].a += +r.sent_to_stores + +r.sold_online; byDay[r.inward_date].b += +r.remaining; });
+  $("#chInwards").innerHTML = barsSvg(Object.keys(byDay).sort().map(k=>byDay[k]),{h:220});
+  const byCat={}; rows.forEach(r=>{ const k=r.category||"(none)"; byCat[k] ??= {label:k,a:0,b:0}; byCat[k].a += +r.sent_to_stores + +r.sold_online; byCat[k].b += +r.remaining; });
+  $("#chInCat").innerHTML = hbarsSvg(Object.values(byCat).sort((x,y)=>(y.a+y.b)-(x.a+x.b)).slice(0,14));
+  const sizeStr = sz => Object.entries(sz||{}).sort((a,b)=>(["XXS","XS","S","M","L","XL","XXL","3XL"].indexOf(a[0])+1||99)-(["XXS","XS","S","M","L","XL","XXL","3XL"].indexOf(b[0])+1||99)).map(([k,v])=>`${k}:${v}`).join(" ");
+  const chip = r => { const s=inStatusOf(r); return s==="done"?`<span class="chip good">Distributed</span>`: s==="part"?`<span class="chip warn">Partly</span>`:`<span class="chip bad">At Noida</span>`; };
+  S._inRows = rows;
+  $("#inTable").innerHTML = `<thead><tr><th>Received</th><th>Style</th><th>Colour</th><th>Category</th><th>Sizes received</th><th class="r">Received</th><th class="r">Sent to stores</th><th class="r">Sold online</th><th class="r">Picking</th><th class="r">Remaining</th><th class="r">At Noida now</th><th>Status</th></tr></thead><tbody>${
+    rows.map(r=>`<tr class="click" data-k="${esc(r.style_code)}|${esc(r.colour||"")}" data-since="${r.inward_date}"><td>${d(r.inward_date)}</td><td><b>${esc(r.product_name||"")}</b><br><span class="muted num" style="font-size:11px">${esc(r.style_code)}</span></td><td>${esc(title(r.colour))}</td><td class="muted">${esc(r.category||"")}</td><td class="muted num" style="font-size:11px">${esc(sizeStr(r.sizes))}</td><td class="r num"><b>${n0(r.received)}</b></td><td class="r num">${n0(r.sent_to_stores)}</td><td class="r num">${n0(r.sold_online)}</td><td class="r num">${n0(r.in_picking)}</td><td class="r num ${r.remaining>0?"err":""}">${n0(r.remaining)}</td><td class="r num">${n0(r.at_noida)}</td><td>${chip(r)}</td></tr>`).join("") || `<tr><td class="empty" colspan="12">Nothing received in this period</td></tr>`}</tbody>`;
+  $("#inTable").querySelectorAll("tr.click").forEach(tr => tr.onclick = () => openInward(tr.dataset.k, tr.dataset.since));
+}
+$("#inExport").onclick = () => exportCsv(`mulmul-inwards-${S.inRange?.[0]}-to-${S.inRange?.[1]}.csv`, [["inward_date","Received on"],["product_name","Style"],["style_code","Style code"],[r=>title(r.colour),"Colour"],["category","Category"],[r=>Object.entries(r.sizes||{}).map(([k,v])=>`${k}:${v}`).join(" "),"Sizes"],["received","Received"],["sent_to_stores","Sent to stores"],["sold_online","Sold online"],["in_picking","Picking"],["remaining","Remaining"],["at_noida","At Noida now"],[r=>({done:"Distributed",part:"Partly",none:"At Noida"})[inStatusOf(r)],"Status"]], S._inRows||[]);
+async function openInward(key, since){
+  const [style, colour] = key.split("|"); const r = (S.inwards||[]).find(x=>x.style_code===style && (x.colour||"")===colour && x.inward_date===since); if(!r) return;
+  $("#scrim").classList.add("on"); const D=$("#drawer"); D.classList.add("on");
+  D.innerHTML = `<div class="head"><div><h2 style="margin:0">${esc(r.product_name)} <span class="muted">${esc(title(r.colour))}</span></h2><div class="muted">Received ${d(r.inward_date)} · ${n0(r.received)} pcs · ${esc(r.category||"")} · <span class="num">${esc(r.style_code)}</span></div></div><button class="x" id="dx">Close</button></div><div class="loading muted" style="padding:20px">Loading…</div>`;
+  $("#dx").onclick = closeDrawer;
+  const cf = colour ? `colour=eq.${encodeURIComponent(colour)}` : "colour=is.null";
+  const [stores, stock] = await Promise.all([ rpc("dashboard_inward_stores",{p_style:style,p_colour:colour,since:r.inward_date}), q(`v_stock_sku?style_code=eq.${encodeURIComponent(style)}&${cf}&select=size,location_name,location_type,bin,qty`) ]);
+  const sizes = Object.entries(r.sizes||{}).map(([k,v])=>({label:k,a:+v,b:0}));
+  const noida = {}; stock.filter(x=>x.location_type==="WH").forEach(x=>{ noida[x.size||"-"]=(noida[x.size||"-"]||0)+x.qty; });
+  const stRows = stores.map(x=>({label:x.to_name||x.to_code||"?", a:+x.shipped||0, b:+x.picking||0}));
+  D.querySelector(".loading").outerHTML = `
+    <div class="cards" style="margin-top:12px;grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">
+      <div class="card"><div class="hero num">${n0(r.received)}<small>received</small></div></div>
+      <div class="card"><div class="hero num">${n0(r.sent_to_stores)}<small>sent to stores</small></div><div class="muted">${stores.length} stores</div></div>
+      <div class="card"><div class="hero num">${n0(r.sold_online)}<small>sold online</small></div></div>
+      <div class="card"><div class="hero num ${r.remaining>0?"err":""}">${n0(r.remaining)}<small>remaining</small></div><div class="muted">${n0(r.in_picking)} picking · ${n0(r.at_noida)} at Noida now</div></div>
+    </div>
+    <div class="grid2" style="margin-top:12px">
+      <div class="chart"><h3>Where it went (since ${d(r.inward_date)})</h3><div class="legend"><span><i style="background:var(--online)"></i>Shipped</span><span><i style="background:var(--store)"></i>Picking</span></div>${hbarsSvg(stRows)}</div>
+      <div class="chart"><h3>Sizes received vs at Noida now</h3><div class="tw"><table><thead><tr><th>Size</th><th class="r">Received</th><th class="r">At Noida now</th></tr></thead><tbody>${sizes.map(x=>`<tr><td>${esc(x.label)}</td><td class="r num">${n0(x.a)}</td><td class="r num">${n0(noida[x.label]||0)}</td></tr>`).join("")}</tbody></table></div></div>
+    </div>
+    <div class="tw" style="margin-top:12px"><table><thead><tr><th>Store</th><th class="r">Shipped</th><th class="r">Picking</th><th>First sent</th><th>Last sent</th></tr></thead><tbody>${stores.map(x=>`<tr><td>${esc(x.to_name||x.to_code)}</td><td class="r num">${n0(x.shipped)}</td><td class="r num">${n0(x.picking)}</td><td>${d(x.first_sent)}</td><td>${d(x.last_sent)}</td></tr>`).join("")||`<tr><td class="empty" colspan="5">No transfers to stores since this receipt</td></tr>`}</tbody></table></div>
+    <div class="row" style="margin-top:10px"><button class="btn" id="inSales" type="button">Open sales drill-down for this style →</button></div>`;
+  $("#inSales").onclick = () => openDrawer(key);
+}
+document.querySelector('nav button[data-tab="inwards"]').addEventListener("click", () => { if(!S.inwards) { const [a,b]=inRange(); $("#inFrom").value=a; $("#inTo").value=b; loadInwards(); } });
 
 // ---------- Ask ----------
 function md(t){ // minimal markdown: **bold**, bullets, paragraphs

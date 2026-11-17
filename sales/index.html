@@ -274,7 +274,7 @@ async function qAll(path, page=1000){ // page through PostgREST (server caps at 
 // ---------- state ----------
 const S = { repl:[], launches:[], weekly:[], summary:[], stores:[], sync:[], settings:{} };
 const mondayOf = dt => { const x = new Date(dt); const day = (x.getDay()+6)%7; x.setDate(x.getDate()-day); x.setHours(0,0,0,0); return x; };
-const iso = dt => dt.toISOString().slice(0,10);
+const iso = dt => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;
 
 async function load(){
   const since = iso(new Date(mondayOf(new Date()).getTime() - 8*7*86400000));
@@ -698,7 +698,7 @@ async function openInward(key, since){
   const cf = colour ? `colour=eq.${encodeURIComponent(colour)}` : "colour=is.null";
   const [stores, stock] = await Promise.all([ rpc("dashboard_inward_stores",{p_style:style,p_colour:colour,since:r.inward_date}), q(`v_stock_sku?style_code=eq.${encodeURIComponent(style)}&${cf}&select=size,location_name,location_type,bin,qty`) ]);
   const sizes = Object.entries(r.sizes||{}).map(([k,v])=>({label:k,a:+v,b:0}));
-  const noida = {}; stock.filter(x=>x.location_type==="WH").forEach(x=>{ noida[x.size||"-"]=(noida[x.size||"-"]||0)+x.qty; });
+  const noida = {}; stock.filter(x=>x.location_type==="WH" && /noida/i.test(x.location_name||"") && !/^(VIR|INTRANSIT)/i.test(x.bin||"")).forEach(x=>{ noida[x.size||"-"]=(noida[x.size||"-"]||0)+x.qty; });
   const stRows = stores.map(x=>({label:x.to_name||x.to_code||"?", a:+x.shipped||0, b:+x.picking||0}));
   D.querySelector(".loading").outerHTML = `
     <div class="cards" style="margin-top:12px;grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">

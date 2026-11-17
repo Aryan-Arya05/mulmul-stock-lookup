@@ -399,6 +399,7 @@ try {
       total += rows.length;
       for (const r of rows) { const d = new Date(r.order_date); if (d > maxSeen) maxSeen = d; }
     }
+    await flushSto();                                                        // transfer orders captured by flatten()
     await setState({ detail: `written ${total} lines; through ${fmtIST(we)}` });
   }
   // Watermark = end of the window actually fetched (status-update time), not max order date.

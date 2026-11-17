@@ -1,0 +1,23 @@
+name: Verify store stock (sold-out detection)
+on:
+  workflow_dispatch:
+    inputs:
+      budget_min: { description: "Minutes to run", default: "52" }
+      gap_ms: { description: "Pause between Vinculum calls (ms)", default: "3000" }
+concurrency: { group: verify-stores, cancel-in-progress: false }
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 58
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: node scripts/verify-stores.mjs
+        env:
+          VINCULUM_API_KEY: ${{ secrets.VINCULUM_API_KEY }}
+          VINCULUM_API_OWNER: ceo
+          SUPABASE_URL: https://idhtjxirqvaensqhozdc.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          BUDGET_MIN: ${{ inputs.budget_min || '52' }}
+          GAP_MS: ${{ inputs.gap_ms || '3000' }}

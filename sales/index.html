@@ -187,7 +187,7 @@ svg text{font-family:var(--sans);font-size:11px;fill:var(--muted)}
   </section>
 
   <section id="inwards">
-    <h2>Received from production <small>stock added at Noida (JIT) — and where it has gone since</small></h2>
+    <h2>Received at Noida <small>stock additions at the Noida warehouse (same rule as the Aging report) — and where each lot has gone since</small></h2>
     <div class="filters">
       <select id="inPreset"><option value="1">Yesterday</option><option value="0">Today</option><option value="7" selected>Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="custom">Custom…</option></select>
       <input type="date" id="inFrom"><span class="muted">to</span><input type="date" id="inTo">
@@ -195,6 +195,7 @@ svg text{font-family:var(--sans);font-size:11px;fill:var(--muted)}
       <input type="search" id="inSearch" placeholder="Style, colour, code…" style="min-width:240px">
       <select id="inCat"><option value="">All categories</option></select>
       <select id="inStatus"><option value="">All</option><option value="done">Fully distributed</option><option value="part">Partly distributed</option><option value="none">Still at Noida</option></select>
+      <select id="inRem"><option value="">All remarks</option></select>
       <span class="right muted" id="inNote"></span>
       <button class="btn" id="inExport" type="button">Export CSV</button>
     </div>
@@ -656,7 +657,7 @@ function inRange(){ const v=$("#inPreset").value; const today=new Date(); today.
   return [fmtD(new Date(today.getTime()-(+v-1)*86400000)), fmtD(today)]; }
 $("#inPreset").onchange = () => { if($("#inPreset").value!=="custom"){ const [a,b]=inRange(); $("#inFrom").value=a; $("#inTo").value=b; loadInwards(); } };
 $("#inApply").onclick = loadInwards;
-["inSearch","inCat","inStatus"].forEach(id => $("#"+id).addEventListener("input", renderInwards));
+["inSearch","inCat","inStatus","inRem"].forEach(id => $("#"+id).addEventListener("input", renderInwards));
 async function loadInwards(){
   const [from,to]=inRange(); if(!from||!to) return;
   $("#inNote").textContent="Loading…"; $("#inTable").innerHTML=`<tbody><tr><td class="empty">Loading…</td></tr></tbody>`;
@@ -667,8 +668,9 @@ function inStatusOf(r){ const out=r.sent_to_stores+r.sold_online; return out>=r.
 function renderInwards(){
   const rows0 = S.inwards||[]; if(!S.inRange) return;
   fillSelect($("#inCat"), rows0.map(r=>r.category), "All categories");
-  const q=$("#inSearch").value.toLowerCase().trim(), cat=$("#inCat").value, st=$("#inStatus").value;
-  const rows = rows0.filter(r => (!cat||r.category===cat) && (!st||inStatusOf(r)===st) && (!q || `${r.product_name} ${r.colour} ${r.style_code}`.toLowerCase().includes(q)));
+  fillSelect($("#inRem"), rows0.map(r=>r.remarks||"(no remark)"), "All remarks");
+  const q=$("#inSearch").value.toLowerCase().trim(), cat=$("#inCat").value, st=$("#inStatus").value, rem=$("#inRem").value;
+  const rows = rows0.filter(r => (!cat||r.category===cat) && (!st||inStatusOf(r)===st) && (!rem||(r.remarks||"(no remark)")===rem) && (!q || `${r.product_name} ${r.colour} ${r.style_code} ${r.remarks||""}`.toLowerCase().includes(q)));
   const tot = rows.reduce((t,r)=>{ t.rec+=+r.received; t.sent+=+r.sent_to_stores; t.online+=+r.sold_online; t.pick+=+r.in_picking; t.rem+=+r.remaining; return t; },{rec:0,sent:0,online:0,pick:0,rem:0});
   const [from,to]=S.inRange; $("#inNote").textContent = `${d(from)} – ${d(to)} · ${rows.length} style-colours`;
   $("#inCards").innerHTML = `
@@ -683,11 +685,11 @@ function renderInwards(){
   const sizeStr = sz => Object.entries(sz||{}).sort((a,b)=>(["XXS","XS","S","M","L","XL","XXL","3XL"].indexOf(a[0])+1||99)-(["XXS","XS","S","M","L","XL","XXL","3XL"].indexOf(b[0])+1||99)).map(([k,v])=>`${k}:${v}`).join(" ");
   const chip = r => { const s=inStatusOf(r); return s==="done"?`<span class="chip good">Distributed</span>`: s==="part"?`<span class="chip warn">Partly</span>`:`<span class="chip bad">At Noida</span>`; };
   S._inRows = rows;
-  $("#inTable").innerHTML = `<thead><tr><th>Received</th><th>Style</th><th>Colour</th><th>Category</th><th>Sizes received</th><th class="r">Received</th><th class="r">Sent to stores</th><th class="r">Sold online</th><th class="r">Picking</th><th class="r">Remaining</th><th class="r">At Noida now</th><th>Status</th></tr></thead><tbody>${
-    rows.map(r=>`<tr class="click" data-k="${esc(r.style_code)}|${esc(r.colour||"")}" data-since="${r.inward_date}"><td>${d(r.inward_date)}</td><td><b>${esc(r.product_name||"")}</b><br><span class="muted num" style="font-size:11px">${esc(r.style_code)}</span></td><td>${esc(title(r.colour))}</td><td class="muted">${esc(r.category||"")}</td><td class="muted num" style="font-size:11px">${esc(sizeStr(r.sizes))}</td><td class="r num"><b>${n0(r.received)}</b></td><td class="r num">${n0(r.sent_to_stores)}</td><td class="r num">${n0(r.sold_online)}</td><td class="r num">${n0(r.in_picking)}</td><td class="r num ${r.remaining>0?"err":""}">${n0(r.remaining)}</td><td class="r num">${n0(r.at_noida)}</td><td>${chip(r)}</td></tr>`).join("") || `<tr><td class="empty" colspan="12">Nothing received in this period</td></tr>`}</tbody>`;
+  $("#inTable").innerHTML = `<thead><tr><th>Received</th><th>Style</th><th>Colour</th><th>Category</th><th>Sizes received</th><th>Remark / bin</th><th class="r">Received</th><th class="r">Sent to stores</th><th class="r">Sold online</th><th class="r">Picking</th><th class="r">Remaining</th><th class="r">At Noida now</th><th>Status</th></tr></thead><tbody>${
+    rows.map(r=>`<tr class="click" data-k="${esc(r.style_code)}|${esc(r.colour||"")}" data-since="${r.inward_date}"><td>${d(r.inward_date)}</td><td><b>${esc(r.product_name||"")}</b><br><span class="muted num" style="font-size:11px">${esc(r.style_code)}</span></td><td>${esc(title(r.colour))}</td><td class="muted">${esc(r.category||"")}</td><td class="muted num" style="font-size:11px">${esc(sizeStr(r.sizes))}</td><td class="muted" style="font-size:11px;white-space:normal;max-width:180px">${esc(r.remarks||"")}<br>${esc(r.bins||"")}</td><td class="r num"><b>${n0(r.received)}</b></td><td class="r num">${n0(r.sent_to_stores)}</td><td class="r num">${n0(r.sold_online)}</td><td class="r num">${n0(r.in_picking)}</td><td class="r num ${r.remaining>0?"err":""}">${n0(r.remaining)}</td><td class="r num">${n0(r.at_noida)}</td><td>${chip(r)}</td></tr>`).join("") || `<tr><td class="empty" colspan="13">Nothing received in this period</td></tr>`}</tbody>`;
   $("#inTable").querySelectorAll("tr.click").forEach(tr => tr.onclick = () => openInward(tr.dataset.k, tr.dataset.since));
 }
-$("#inExport").onclick = () => exportCsv(`mulmul-inwards-${S.inRange?.[0]}-to-${S.inRange?.[1]}.csv`, [["inward_date","Received on"],["product_name","Style"],["style_code","Style code"],[r=>title(r.colour),"Colour"],["category","Category"],[r=>Object.entries(r.sizes||{}).map(([k,v])=>`${k}:${v}`).join(" "),"Sizes"],["received","Received"],["sent_to_stores","Sent to stores"],["sold_online","Sold online"],["in_picking","Picking"],["remaining","Remaining"],["at_noida","At Noida now"],[r=>({done:"Distributed",part:"Partly",none:"At Noida"})[inStatusOf(r)],"Status"]], S._inRows||[]);
+$("#inExport").onclick = () => exportCsv(`mulmul-inwards-${S.inRange?.[0]}-to-${S.inRange?.[1]}.csv`, [["inward_date","Received on"],["product_name","Style"],["style_code","Style code"],[r=>title(r.colour),"Colour"],["category","Category"],[r=>Object.entries(r.sizes||{}).map(([k,v])=>`${k}:${v}`).join(" "),"Sizes"],["remarks","Remark"],["bins","Bins"],["received","Received"],["sent_to_stores","Sent to stores"],["sold_online","Sold online"],["in_picking","Picking"],["remaining","Remaining"],["at_noida","At Noida now"],[r=>({done:"Distributed",part:"Partly",none:"At Noida"})[inStatusOf(r)],"Status"]], S._inRows||[]);
 async function openInward(key, since){
   const [style, colour] = key.split("|"); const r = (S.inwards||[]).find(x=>x.style_code===style && (x.colour||"")===colour && x.inward_date===since); if(!r) return;
   $("#scrim").classList.add("on"); const D=$("#drawer"); D.classList.add("on");

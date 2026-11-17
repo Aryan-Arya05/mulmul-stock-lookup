@@ -318,6 +318,9 @@ if (process.env.BACKFILL === "1") {
   const STOP_AT = process.env.BACKFILL_STOP_DATE ? parseDMY(process.env.BACKFILL_STOP_DATE) : null;   // history before this comes from the archive load
   if (STOP_AT && cursor <= STOP_AT) { await bset({ status: "done", last_run: new Date().toISOString(), detail: `complete: reached stop date ${fmtIST(STOP_AT).slice(0, 10)}` }); log("backfill reached stop date"); process.exit(0); }
   let total = 0, windows = 0; const skipped = [];
+  // Backfill walks one day at a time so every day is committed and the watermark always moves,
+  // even when one day is huge (a bulk status update in Vinculum can put thousands of old orders into one updatedDate).
+  const BF_WINDOW_DAYS = Number(process.env.BACKFILL_WINDOW_DAYS || 1);
   // Pull all pages of [ws, we]; on a persistent Vinculum error split the window down to single days and skip only those.
   async function fetchWindow(ws, we) {
     try {
@@ -328,10 +331,16 @@ if (process.env.BACKFILL === "1") {
         if (!list.length) break;
         orders.push(...list);
         const totalPages = Number(payload.totalPages || 0);
+        if (page === 1 || page % 10 === 0) {
+          log(`    ${fmtIST(ws).slice(0, 10)}: page ${page}${totalPages ? `/${totalPages}` : ""}, ${orders.length} orders so far`);
+          await bset({ detail: `pulling ${fmtIST(ws).slice(0, 10)} page ${page}${totalPages ? `/${totalPages}` : ""} (${orders.length} orders); this run ${total} lines over ${windows} windows; empties=${empties}` }).catch(() => {});
+        }
         if (totalPages ? page >= totalPages : list.length < PAGE_SIZE) break;
+        if (Date.now() - t0 > BUDGET_MS + 30 * 60000) throw Object.assign(new Error("window exceeded time budget"), { noSplit: true });
       }
       return orders;
     } catch (e) {
+      if (e.noSplit) throw e;
       const span = we.getTime() - ws.getTime();
       if (span <= 86400000) { log(`  SKIP ${fmtIST(ws).slice(0, 10)}: ${e.message.slice(0, 120)}`); skipped.push(fmtIST(ws).slice(0, 10)); return []; }
       const mid = new Date(ws.getTime() + Math.floor(span / 2 / 86400000) * 86400000 || ws.getTime() + span / 2);
@@ -342,7 +351,7 @@ if (process.env.BACKFILL === "1") {
   await bset({ status: "running", last_run: new Date().toISOString(), watermark: cursor.toISOString(), detail: `resuming at ${fmtIST(cursor)} empties=${empties}` });
   try {
     while (Date.now() - t0 < BUDGET_MS && empties < EMPTY_STOP && !(STOP_AT && cursor <= STOP_AT)) {
-      const we = new Date(cursor.getTime() - 1000), ws = new Date(cursor.getTime() - WINDOW_DAYS * 86400000);
+      const we = new Date(cursor.getTime() - 1000), ws = new Date(cursor.getTime() - BF_WINDOW_DAYS * 86400000);
       const orders = await fetchWindow(ws, we);
       const rows = flatten(orders);
       await flushSto();
@@ -383,6 +392,7 @@ try {
       }
       return orders;
     } catch (e) {
+      if (e.noSplit) throw e;
       const span = we.getTime() - ws.getTime();
       if (span <= 86400000) { log(`  SKIP ${fmtIST(ws).slice(0, 10)}: ${e.message.slice(0, 120)}`); skippedDays.push(fmtIST(ws).slice(0, 10)); return []; }
       const mid = new Date(ws.getTime() + Math.max(86400000, Math.floor(span / 2 / 86400000) * 86400000));

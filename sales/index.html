@@ -46,6 +46,16 @@ h2 small{color:var(--muted);font-weight:400;margin-left:8px}
 .hero small{font-size:12px;color:var(--muted);font-weight:400;margin-left:6px}
 .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:8px 0}
 .filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0 12px}
+.msel{position:relative;display:inline-block}
+.msel>button{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 28px 7px 10px;cursor:pointer;text-align:left;min-width:150px;max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;position:relative}
+.msel>button:after{content:"";position:absolute;right:11px;top:50%;width:6px;height:6px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:translateY(-70%) rotate(45deg);opacity:.6}
+.msel>button.on{border-color:var(--ink,#222);font-weight:600}
+.msel .pop{display:none;position:absolute;z-index:40;top:calc(100% + 4px);left:0;min-width:220px;max-height:320px;overflow:auto;background:var(--card);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.12);padding:6px}
+.msel.open .pop{display:block}
+.msel .pop label{display:flex;gap:8px;align-items:center;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:13px;white-space:nowrap}
+.msel .pop label:hover{background:var(--bg,#f4f4f2)}
+.msel .pop .tools{display:flex;gap:6px;padding:4px 8px 6px;border-bottom:1px solid var(--line);margin-bottom:4px}
+.msel .pop .tools button{background:none;border:0;padding:0;font-size:12px;cursor:pointer;color:var(--muted,#666);text-decoration:underline}
 .filters select,.filters input{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 10px}
 .filters input[type=search]{min-width:220px}
 .btn{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 12px;font-weight:500}
@@ -130,7 +140,7 @@ svg text{font-family:var(--sans);font-size:11px;fill:var(--muted)}
     <div id="ovPeriod" style="display:none;margin-top:14px">
       <div class="grid2">
         <div class="chart"><h3 id="ovDailyTitle">Units per day — online vs store</h3><div class="legend"><span><i style="background:var(--online)"></i>Online</span><span><i style="background:var(--store)"></i>Store</span></div><div id="chDaily"></div></div>
-        <div class="chart"><h3>Best sellers in this period</h3><div class="filters" style="margin:0 0 8px"><select id="ovCat"><option value="">All categories</option></select><select id="ovChan"><option value="">Online + Store</option><option>Online</option><option>Store</option></select><button class="btn right" id="ovExport" type="button">Export CSV</button></div><div class="tw" style="max-height:520px"><table id="ovTop"></table></div></div>
+        <div class="chart"><h3>Best sellers in this period</h3><div class="filters" style="margin:0 0 8px"><div class="msel" id="ovCat" data-label="All categories"></div><select id="ovChan"><option value="">Online + Store</option><option>Online</option><option>Store</option></select><button class="btn right" id="ovExport" type="button">Export CSV</button></div><div class="tw" style="max-height:520px"><table id="ovTop"></table></div></div>
       </div>
     </div>
     <div class="grid2" style="margin-top:14px">
@@ -156,7 +166,7 @@ svg text{font-family:var(--sans);font-size:11px;fill:var(--muted)}
     <h2>Product sale report <small>any style × colour, full history — click a row for the drill-down</small></h2>
     <div class="filters">
       <input type="search" id="pSearch" placeholder="One or many: Shvi - Elaan - Saia, or WW2601, or fuschia" autofocus style="min-width:420px">
-      <select id="pCat"><option value="">All categories</option></select>
+      <div class="msel" id="pCat" data-label="All categories"></div>
       <select id="pSort"><option value="units">Most sold</option><option value="_stock">Most stock</option><option value="last_sale">Most recent</option><option value="first_sale">Newest launch</option><option value="orders">Most orders</option></select>
       <span class="right muted" id="pCount"></span>
       <button class="btn" id="pExport" type="button">Export CSV</button>
@@ -179,7 +189,7 @@ svg text{font-family:var(--sans);font-size:11px;fill:var(--muted)}
       </select>
       <select id="aWeeks"><option value="1">This week</option><option value="2">Last 2 weeks</option><option value="4" selected>Last 4 weeks</option><option value="8">Last 8 weeks</option><option value="52">All time</option></select>
       <select id="aChan"><option value="">Online + Store</option><option>Online</option><option>Store</option></select>
-      <select id="aCat"><option value="">All categories</option></select>
+      <div class="msel" id="aCat" data-label="All categories"></div>
       <input type="search" id="aSearch" placeholder="Filter…">
       <button class="btn right" id="aExport" type="button">Export CSV</button>
     </div>
@@ -193,7 +203,7 @@ svg text{font-family:var(--sans);font-size:11px;fill:var(--muted)}
       <input type="date" id="inFrom"><span class="muted">to</span><input type="date" id="inTo">
       <button class="btn" id="inApply" type="button">Apply</button>
       <input type="search" id="inSearch" placeholder="Style, colour, code…" style="min-width:240px">
-      <select id="inCat"><option value="">All categories</option></select>
+      <div class="msel" id="inCat" data-label="All categories"></div>
       <select id="inStatus"><option value="">All</option><option value="done">Fully distributed</option><option value="part">Partly distributed</option><option value="none">Still at Noida</option></select>
       <select id="inRem"><option value="">All remarks</option></select>
       <span class="right muted" id="inNote"></span>
@@ -415,14 +425,14 @@ function renderPeriod(){
   const meta={}; S.summary.forEach(x=>meta[`${x.style_code}|${x.colour}`]=x);
   const repl={}; S.repl.forEach(r=>repl[`${r.style_code}|${r.colour}`]=r);
   fillSelect($("#ovCat"), P.rows.map(r=>meta[`${r.style_code}|${r.colour}`]?.category), "All categories");
-  const cat=$("#ovCat").value, chan=$("#ovChan").value;
+  const cat=msVal($("#ovCat")), chan=$("#ovChan").value;
   const tot = P.rows.reduce((t,r)=>t+ +r.units,0);
   $("#ovPeriodNote").textContent = `${d(P.from)} – ${d(P.to)} · ${P.days} days · ${n0(tot)} units`;
   const dd={}; P.daily.forEach(x=>{ dd[x.sale_date] ??= {label:d(x.sale_date),a:0,b:0}; if(x.channel==="Online") dd[x.sale_date].a+=+x.units; else dd[x.sale_date].b+=+x.units; });
   $("#chDaily").innerHTML = barsSvg(Object.keys(dd).sort().map(k=>dd[k]), {h:220});
   let rows = P.rows.map(r=>{ const m=meta[`${r.style_code}|${r.colour}`]||{}; const st=(S.stock||{})[`${r.style_code}|${r.colour}`]||{}; const u = chan==="Online"?+r.online_units||0: chan==="Store"?+r.store_units||0: +r.units;
     return {...r, category:m.category, collection:m.collection||repl[`${r.style_code}|${r.colour}`]?.collection||"", u, per_day: u/P.days, on_hand:(+st.store_on_hand||0)+(+st.wh_on_hand||0), share: tot?u/tot*100:0}; })
-    .filter(r=>(!cat||r.category===cat) && r.u>0).sort((a,b)=>b.u-a.u);
+    .filter(r=>catOk(cat,r.category) && r.u>0).sort((a,b)=>b.u-a.u);
   S._periodRows = rows;
   $("#ovTop").innerHTML = `<thead><tr><th>#</th><th>Style</th><th>Colour</th><th>Category</th><th>Launch</th><th class="r">Units</th><th class="r">Share</th><th class="r">/day</th><th class="r">Online</th><th class="r">Store</th><th class="r">On hand</th></tr></thead><tbody>${
     rows.slice(0,50).map((r,i)=>`<tr class="click" data-k="${esc(r.style_code)}|${esc(r.colour||"")}"><td class="muted">${i+1}</td><td><b>${esc(r.product_name||"")}</b></td><td>${esc(title(r.colour))}</td><td class="muted">${esc(r.category||"")}</td><td class="muted">${esc(r.collection||"")}</td><td class="r num"><b>${n0(r.u)}</b></td><td class="r num">${r.share.toFixed(1)}%</td><td class="r num">${n1(r.per_day)}</td><td class="r num">${n0(r.online_units)}</td><td class="r num">${n0(r.store_units)}</td><td class="r num ${r.on_hand===0?"err":""}">${n0(r.on_hand)}</td></tr>`).join("")}</tbody>`;
@@ -435,7 +445,28 @@ function stageChip(s){ const c = s==="Delivered"?"good": s==="Overdue"?"bad": s=
 
 // ---------- Replenishment table ----------
 let rSort = {k:"shortfall", dir:-1};
-function fillSelect(sel, vals, keep){ const cur = sel.value; sel.innerHTML = `<option value="">${keep}</option>` + [...new Set(vals.filter(Boolean))].map(v=>`<option>${esc(v)}</option>`).join(""); sel.value = cur; }
+// Multi-select dropdown (checkbox list). `.value` is a Set of lower-cased selections; empty = no filter. Fires "input" like a <select>.
+function makeMsel(el){
+  if(el._ms) return el._ms;
+  const label = el.dataset.label || "All";
+  el.innerHTML = `<button type="button"></button><div class="pop"><div class="tools"><button type="button" data-a="all">Select all</button><button type="button" data-a="none">Clear</button></div><div class="opts"></div></div>`;
+  const btn = el.firstChild, pop = el.querySelector(".pop"), opts = el.querySelector(".opts");
+  const ms = { sel:new Set(), names:[], get value(){ return ms.sel; } };
+  const paint = () => { const n=ms.sel.size; btn.textContent = n===0 ? label : n===1 ? ms.names.find(x=>x.toLowerCase()===[...ms.sel][0]) || [...ms.sel][0] : `${n} categories`; btn.classList.toggle("on", n>0); btn.title = n ? [...ms.sel].join(", ") : ""; };
+  const fire = () => { paint(); el.dispatchEvent(new Event("input", {bubbles:true})); };
+  ms.fill = vals => { const seen=new Map(); vals.filter(Boolean).forEach(v=>{ const k=v.toLowerCase(); if(!seen.has(k)) seen.set(k,v); }); const names=[...seen.values()].sort((a,b)=>a.localeCompare(b)); if(names.join("\u0001")===ms.names.join("\u0001")) return; ms.names=names;
+    opts.innerHTML = names.map(v=>`<label><input type="checkbox" value="${esc(v.toLowerCase())}" ${ms.sel.has(v.toLowerCase())?"checked":""}> ${esc(v)}</label>`).join(""); paint(); };
+  opts.addEventListener("change", e => { const cb=e.target; if(cb.type!=="checkbox") return; cb.checked ? ms.sel.add(cb.value) : ms.sel.delete(cb.value); fire(); });
+  pop.querySelector(".tools").addEventListener("click", e => { const a=e.target.dataset.a; if(!a) return; ms.sel = a==="all" ? new Set(ms.names.map(v=>v.toLowerCase())) : new Set(); opts.querySelectorAll("input").forEach(cb=>cb.checked=ms.sel.has(cb.value)); fire(); });
+  btn.addEventListener("click", e => { e.stopPropagation(); const open=el.classList.contains("open"); document.querySelectorAll(".msel.open").forEach(x=>x.classList.remove("open")); if(!open) el.classList.add("open"); });
+  pop.addEventListener("click", e => e.stopPropagation());
+  paint(); el._ms = ms; return ms;
+}
+document.addEventListener("click", () => document.querySelectorAll(".msel.open").forEach(x=>x.classList.remove("open")));
+document.addEventListener("keydown", e => { if(e.key==="Escape") document.querySelectorAll(".msel.open").forEach(x=>x.classList.remove("open")); });
+const msVal = el => makeMsel(el).value;                                   // Set of selected categories (lower-case), empty = all
+const catOk = (cats, c) => !cats.size || cats.has(String(c||"").toLowerCase());
+function fillSelect(sel, vals, keep){ if(sel.classList.contains("msel")){ makeMsel(sel).fill(vals); return; } const cur = sel.value; sel.innerHTML = `<option value="">${keep}</option>` + [...new Set(vals.filter(Boolean))].map(v=>`<option>${esc(v)}</option>`).join(""); sel.value = cur; }
 function renderRepl(){
   fillSelect($("#rColl"), S.repl.map(r=>r.collection), "All launches");
   fillSelect($("#rStage"), S.repl.map(r=>r.production_stage), "All stages");
@@ -584,12 +615,12 @@ async function applyProdPeriod(){
   renderProducts();
 }
 function renderProducts(){
-  const terms=$("#pSearch").value.toLowerCase().split(/[-,|\/\n;]+/).map(t=>t.trim()).filter(Boolean), cat=$("#pCat").value, sort=$("#pSort").value;
+  const terms=$("#pSearch").value.toLowerCase().split(/[-,|\/\n;]+/).map(t=>t.trim()).filter(Boolean), cat=msVal($("#pCat")), sort=$("#pSort").value;
   fillSelect($("#pCat"), S.summary.map(x=>x.category), "All categories");
   const rx = terms.length>1 ? terms.map(t => new RegExp(`(^|[^a-z0-9])${t.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")}([^a-z0-9]|$)`)) : null;   // list = whole-word match; single term = loose
   const PP = S.prodPeriod;
   const base = PP ? S.summary.filter(x=>PP.map[`${x.style_code}|${x.colour||""}`]).map(x=>{ const p=PP.map[`${x.style_code}|${x.colour||""}`]; return {...x, units:+p.units, online_units:+p.online_units||0, store_units:+p.store_units||0, orders:null, _days:PP.days, _first:p.first_in_period, _last:p.last_in_period}; }) : S.summary;
-  let rows = base.filter(x => { if(cat&&x.category!==cat) return false; if(!terms.length) return true; const h=`${x.product_name} ${x.style_code} ${x.colour} ${x.collection||""} ${x.segment||""}`.toLowerCase(); return rx ? rx.some(r=>r.test(h)) : h.includes(terms[0]); });
+  let rows = base.filter(x => { if(!catOk(cat,x.category)) return false; if(!terms.length) return true; const h=`${x.product_name} ${x.style_code} ${x.colour} ${x.collection||""} ${x.segment||""}`.toLowerCase(); return rx ? rx.some(r=>r.test(h)) : h.includes(terms[0]); });
   const oh = x => { const st=(S.stock||{})[`${x.style_code}|${x.colour}`]||{}; return (+st.store_on_hand||0)+(+st.wh_on_hand||0); };
   rows.sort((a,b)=> sort==="_stock" ? oh(b)-oh(a) : sort==="units"||sort==="orders" ? (+b[sort]||0)-(+a[sort]||0) : String(b[sort]||"").localeCompare(String(a[sort]||"")));
   const tot = rows.reduce((t,x)=>{ const st=(S.stock||{})[`${x.style_code}|${x.colour}`]||{}; t.u+=+x.units||0; t.oh+=(+st.store_on_hand||0)+(+st.wh_on_hand||0); t.p+=(+st.intransit||0)+(+st.in_production||0)+(+st.vir_store||0); return t; },{u:0,oh:0,p:0});
@@ -612,7 +643,7 @@ $("#pExport").onclick = () => { const st = x => (S.stock||{})[`${x.style_code}|$
 
 // ---------- Attributes ----------
 function renderAttr(){
-  const dim=$("#aDim").value, weeks=+$("#aWeeks").value, chan=$("#aChan").value, cat=$("#aCat").value, s=$("#aSearch").value.toLowerCase();
+  const dim=$("#aDim").value, weeks=+$("#aWeeks").value, chan=$("#aChan").value, cat=msVal($("#aCat")), s=$("#aSearch").value.toLowerCase();
   const meta = {}; S.summary.forEach(x => meta[`${x.style_code}|${x.colour}`] = x);
   fillSelect($("#aCat"), S.summary.map(x=>x.category), "All categories");
   const since = iso(new Date(mondayOf(new Date()).getTime() - (weeks-1)*7*86400000));
@@ -620,12 +651,12 @@ function renderAttr(){
   const add = (k, ch, u) => { if(!k) k="(none)"; agg[k] ??= {label:k,a:0,b:0}; if(ch==="Online") agg[k].a+=u; else agg[k].b+=u; };
   if(dim==="location_name"){
     if(!S.storeTotals){ S.storeTotals=[]; $("#aTitle").textContent="Loading stores…"; snap("store_totals", () => rpc("dashboard_store_totals")).then(r=>{ S.storeTotals=r; renderAttr(); }); return; }
-    S.storeTotals.forEach(x => { if(cat&&x.category!==cat) return; if(chan==="Online") return; add(x.location_name,"Store",+x.units); }); $("#aTitle").textContent="Units by store (all time)"; }
+    S.storeTotals.forEach(x => { if(!catOk(cat,x.category)) return; if(chan==="Online") return; add(x.location_name,"Store",+x.units); }); $("#aTitle").textContent="Units by store (all time)"; }
   else if(dim==="size"){ $("#aTitle").textContent="Size curve — use a style's drill-down for per-style sizes"; S.summary.forEach(()=>{}); }
   else {
     const src = weeks>=52 ? S.summary.map(x=>({...x, _a:+x.online_units||0, _b:+x.store_units||0})) : null;
-    if(src){ src.forEach(x => { if(cat&&x.category!==cat) return; const v = dim==="colour"?title(x.colour):x[dim]; if(chan!=="Store") add(v,"Online",x._a); if(chan!=="Online") add(v,"Store",x._b); }); }
-    else S.weekly.filter(w=>w.week_start>=since && (!chan||w.channel===chan)).forEach(w => { const m=meta[`${w.style_code}|${w.colour}`]||{}; if(cat&&m.category!==cat) return;
+    if(src){ src.forEach(x => { if(!catOk(cat,x.category)) return; const v = dim==="colour"?title(x.colour):x[dim]; if(chan!=="Store") add(v,"Online",x._a); if(chan!=="Online") add(v,"Store",x._b); }); }
+    else S.weekly.filter(w=>w.week_start>=since && (!chan||w.channel===chan)).forEach(w => { const m=meta[`${w.style_code}|${w.colour}`]||{}; if(!catOk(cat,m.category)) return;
       const v = dim==="colour"?title(w.colour): dim==="product_name"?w.product_name: m[dim]; add(v, w.channel, +w.units); });
     $("#aTitle").textContent = `Units by ${$("#aDim").selectedOptions[0].text.toLowerCase()} — ${$("#aWeeks").selectedOptions[0].text.toLowerCase()}`;
   }
@@ -676,8 +707,8 @@ function renderInwards(){
   const rows0 = S.inwards||[]; if(!S.inRange) return;
   fillSelect($("#inCat"), rows0.map(r=>r.category), "All categories");
   fillSelect($("#inRem"), rows0.map(r=>r.remarks||"(no remark)"), "All remarks");
-  const q=$("#inSearch").value.toLowerCase().trim(), cat=$("#inCat").value, st=$("#inStatus").value, rem=$("#inRem").value;
-  const rows = rows0.filter(r => (!cat||r.category===cat) && (!st||inStatusOf(r)===st) && (!rem||(r.remarks||"(no remark)")===rem) && (!q || `${r.product_name} ${r.colour} ${r.style_code} ${r.remarks||""}`.toLowerCase().includes(q)));
+  const q=$("#inSearch").value.toLowerCase().trim(), cat=msVal($("#inCat")), st=$("#inStatus").value, rem=$("#inRem").value;
+  const rows = rows0.filter(r => catOk(cat,r.category) && (!st||inStatusOf(r)===st) && (!rem||(r.remarks||"(no remark)")===rem) && (!q || `${r.product_name} ${r.colour} ${r.style_code} ${r.remarks||""}`.toLowerCase().includes(q)));
   const tot = rows.reduce((t,r)=>{ t.rec+=+r.received; t.sent+=+r.sent_to_stores; t.online+=+r.sold_online; t.pick+=+r.in_picking; t.rem+=+r.remaining; return t; },{rec:0,sent:0,online:0,pick:0,rem:0});
   const [from,to]=S.inRange; $("#inNote").textContent = `${d(from)} – ${d(to)} · ${rows.length} style-colours`;
   $("#inCards").innerHTML = `

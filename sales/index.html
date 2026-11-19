@@ -167,6 +167,9 @@ svg text{font-family:var(--sans);font-size:11px;fill:var(--muted)}
     <div class="filters">
       <input type="search" id="pSearch" placeholder="One or many: Shvi - Elaan - Saia, or WW2601, or fuschia" autofocus style="min-width:420px">
       <div class="msel" id="pCat" data-label="All categories"></div>
+      <div class="msel" id="pSeg" data-label="All segments"></div>
+      <div class="msel" id="pFab" data-label="All fabrics"></div>
+      <div class="msel" id="pSil" data-label="All silhouettes"></div>
       <select id="pSort"><option value="units">Most sold</option><option value="_stock">Most stock</option><option value="last_sale">Most recent</option><option value="first_sale">Newest launch</option><option value="orders">Most orders</option></select>
       <span class="right muted" id="pCount"></span>
       <button class="btn" id="pExport" type="button">Export CSV</button>
@@ -185,7 +188,7 @@ svg text{font-family:var(--sans);font-size:11px;fill:var(--muted)}
     <div class="filters">
       <select id="aDim">
         <option value="product_name">Style</option><option value="colour">Colour</option><option value="category">Category</option>
-        <option value="fabric">Fabric</option><option value="collection">Launch / collection</option><option value="size">Size</option><option value="location_name">Store</option>
+        <option value="fabric">Fabric</option><option value="segment">Segment</option><option value="silhouette">Silhouette</option><option value="collection">Launch / collection</option><option value="size">Size</option><option value="location_name">Store</option>
       </select>
       <select id="aWeeks"><option value="1">This week</option><option value="2">Last 2 weeks</option><option value="4" selected>Last 4 weeks</option><option value="8">Last 8 weeks</option><option value="52">All time</option></select>
       <select id="aChan"><option value="">Online + Store</option><option>Online</option><option>Store</option></select>
@@ -505,7 +508,7 @@ async function openDrawer(key){
           intransit: null, in_production: null, vir_store: null, production_stage: "No replenishment", repl_1:0, repl_2:0, repl_3:0 }; }
   $("#scrim").classList.add("on"); const D=$("#drawer"); D.classList.add("on");
   D.innerHTML = `<div class="head">${r.image_url?`<img src="${esc(r.image_url)}">`:""}<div><h2 style="margin:0">${esc(r.top_name)} <span class="muted">${esc(title(r.colour_label||r.colour))}</span></h2>
-    <div class="muted">${esc(r.collection)} · ${esc(r.fabric||"")} · <span class="num">${esc(r.style_code)}</span></div>
+    <div class="muted">${esc([r.collection, r.segment||S.summary.find(same)?.segment, r.fabric||S.summary.find(same)?.fabric, S.summary.find(same)?.silhouette].filter(Boolean).join(" · "))} · <span class="num">${esc(r.style_code)}</span></div>
     <div class="row">${r._nonRepl ? `<span class="chip none">Not in replenishment sheet</span>` : covChip(r)+" "+stageChip(r.production_stage)} <span class="chip none">${n1(r.units_per_day)}/day over ${r.days_selling} days</span></div></div><button class="x" id="dx">Close</button></div>
     <div class="loading muted" style="padding:20px">Loading…</div>`;
   $("#dx").onclick = closeDrawer;
@@ -615,12 +618,12 @@ async function applyProdPeriod(){
   renderProducts();
 }
 function renderProducts(){
-  const terms=$("#pSearch").value.toLowerCase().split(/[-,|\/\n;]+/).map(t=>t.trim()).filter(Boolean), cat=msVal($("#pCat")), sort=$("#pSort").value;
-  fillSelect($("#pCat"), S.summary.map(x=>x.category), "All categories");
+  const terms=$("#pSearch").value.toLowerCase().split(/[-,|\/\n;]+/).map(t=>t.trim()).filter(Boolean), cat=msVal($("#pCat")), seg=msVal($("#pSeg")), fab=msVal($("#pFab")), sil=msVal($("#pSil")), sort=$("#pSort").value;
+  fillSelect($("#pCat"), S.summary.map(x=>x.category), "All categories"); fillSelect($("#pSeg"), S.summary.map(x=>x.segment), "All segments"); fillSelect($("#pFab"), S.summary.map(x=>x.fabric), "All fabrics"); fillSelect($("#pSil"), S.summary.map(x=>x.silhouette), "All silhouettes");
   const rx = terms.length>1 ? terms.map(t => new RegExp(`(^|[^a-z0-9])${t.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")}([^a-z0-9]|$)`)) : null;   // list = whole-word match; single term = loose
   const PP = S.prodPeriod;
   const base = PP ? S.summary.filter(x=>PP.map[`${x.style_code}|${x.colour||""}`]).map(x=>{ const p=PP.map[`${x.style_code}|${x.colour||""}`]; return {...x, units:+p.units, online_units:+p.online_units||0, store_units:+p.store_units||0, orders:null, _days:PP.days, _first:p.first_in_period, _last:p.last_in_period}; }) : S.summary;
-  let rows = base.filter(x => { if(!catOk(cat,x.category)) return false; if(!terms.length) return true; const h=`${x.product_name} ${x.style_code} ${x.colour} ${x.collection||""} ${x.segment||""}`.toLowerCase(); return rx ? rx.some(r=>r.test(h)) : h.includes(terms[0]); });
+  let rows = base.filter(x => { if(!catOk(cat,x.category)||!catOk(seg,x.segment)||!catOk(fab,x.fabric)||!catOk(sil,x.silhouette)) return false; if(!terms.length) return true; const h=`${x.product_name} ${x.style_code} ${x.colour} ${x.collection||""} ${x.segment||""} ${x.fabric||""} ${x.silhouette||""} ${x.print_type||""}`.toLowerCase(); return rx ? rx.some(r=>r.test(h)) : h.includes(terms[0]); });
   const oh = x => { const st=(S.stock||{})[`${x.style_code}|${x.colour}`]||{}; return (+st.store_on_hand||0)+(+st.wh_on_hand||0); };
   rows.sort((a,b)=> sort==="_stock" ? oh(b)-oh(a) : sort==="units"||sort==="orders" ? (+b[sort]||0)-(+a[sort]||0) : String(b[sort]||"").localeCompare(String(a[sort]||"")));
   const tot = rows.reduce((t,x)=>{ const st=(S.stock||{})[`${x.style_code}|${x.colour}`]||{}; t.u+=+x.units||0; t.oh+=(+st.store_on_hand||0)+(+st.wh_on_hand||0); t.p+=(+st.intransit||0)+(+st.in_production||0)+(+st.vir_store||0); return t; },{u:0,oh:0,p:0});
@@ -629,15 +632,15 @@ function renderProducts(){
   S._prodRows = rows;
   rows = rows.slice(0,300);
   const stock = {}; S.repl.forEach(r=>stock[`${r.style_code}|${r.colour}`]=r);
-  $("#prodTable").innerHTML = `<thead><tr><th>Style</th><th>Colour</th><th>Category</th><th>Segment / launch</th><th class="r">Units</th><th class="r">Online</th><th class="r">Store</th><th class="r">Orders</th><th>${PP?"First in period":"First sale"}</th><th>${PP?"Last in period":"Last sale"}</th><th class="r">/day</th><th class="r">On hand</th><th class="r">Stores / WH</th><th class="r">Pipeline</th></tr></thead><tbody>${
+  $("#prodTable").innerHTML = `<thead><tr><th>Style</th><th>Colour</th><th>Category</th><th>Segment / launch</th><th>Fabric · silhouette</th><th class="r">Units</th><th class="r">Online</th><th class="r">Store</th><th class="r">Orders</th><th>${PP?"First in period":"First sale"}</th><th>${PP?"Last in period":"Last sale"}</th><th class="r">/day</th><th class="r">On hand</th><th class="r">Stores / WH</th><th class="r">Pipeline</th></tr></thead><tbody>${
     rows.map(x=>{ const days = x._days ? x._days : (x.first_sale&&x.last_sale ? Math.max(1,(new Date(x.last_sale)-new Date(x.first_sale))/86400000+1) : null);
       const st = (S.stock||{})[`${x.style_code}|${x.colour}`] || {}; const so=+st.store_on_hand||0, wh=+st.wh_on_hand||0, pipe=(+st.intransit||0)+(+st.in_production||0)+(+st.vir_store||0);
-      return `<tr class="click" data-k="${esc(x.style_code)}|${esc(x.colour)}"><td><b>${esc(x.product_name||"")}</b><br><span class="muted num" style="font-size:11px">${esc(x.style_code)}</span></td><td>${esc(title(x.colour))}</td><td class="muted">${esc(x.category||"")}</td><td class="muted">${esc(x.collection||x.segment||"")}</td><td class="r num"><b>${n0(x.units)}</b></td><td class="r num">${n0(x.online_units)}</td><td class="r num">${n0(x.store_units)}</td><td class="r num">${x.orders==null?"–":n0(x.orders)}</td><td>${d(x._first||x.first_sale)}</td><td>${d(x._last||x.last_sale)}</td><td class="r num">${days?n1(x.units/days):"–"}</td><td class="r num"><b class="${so+wh===0?"err":""}">${n0(so+wh)}</b></td><td class="r num muted">${n0(so)} / ${n0(wh)}</td><td class="r num">${pipe?n0(pipe):"–"}</td></tr>`; }).join("")}</tbody>`;
+      return `<tr class="click" data-k="${esc(x.style_code)}|${esc(x.colour)}"><td><b>${esc(x.product_name||"")}</b><br><span class="muted num" style="font-size:11px">${esc(x.style_code)}</span></td><td>${esc(title(x.colour))}</td><td class="muted">${esc(x.category||"")}</td><td class="muted">${esc([x.segment,x.collection].filter(Boolean).join(" · "))}</td><td class="muted">${esc([x.fabric,x.silhouette].filter(Boolean).join(" · "))}</td><td class="r num"><b>${n0(x.units)}</b></td><td class="r num">${n0(x.online_units)}</td><td class="r num">${n0(x.store_units)}</td><td class="r num">${x.orders==null?"–":n0(x.orders)}</td><td>${d(x._first||x.first_sale)}</td><td>${d(x._last||x.last_sale)}</td><td class="r num">${days?n1(x.units/days):"–"}</td><td class="r num"><b class="${so+wh===0?"err":""}">${n0(so+wh)}</b></td><td class="r num muted">${n0(so)} / ${n0(wh)}</td><td class="r num">${pipe?n0(pipe):"–"}</td></tr>`; }).join("")}</tbody>`;
   $("#prodTable").querySelectorAll("tr.click").forEach(tr => tr.onclick = () => openDrawer(tr.dataset.k));
 }
-["pSearch","pCat","pSort"].forEach(id => $("#"+id).addEventListener("input", renderProducts));
+["pSearch","pCat","pSeg","pFab","pSil","pSort"].forEach(id => $("#"+id).addEventListener("input", renderProducts));
 $("#pExport").onclick = () => { const st = x => (S.stock||{})[`${x.style_code}|${x.colour}`]||{};
-  exportCsv(`mulmul-products-${stamp()}.csv`, [["product_name","Style"],["style_code","Style code"],[x=>title(x.colour),"Colour"],["category","Category"],["segment","Segment"],["collection","Launch"],["fabric","Fabric"],
+  exportCsv(`mulmul-products-${stamp()}.csv`, [["product_name","Style"],["style_code","Style code"],[x=>title(x.colour),"Colour"],["category","Category"],["segment","Segment"],["collection","Launch"],["fabric","Fabric"],["silhouette","Silhouette"],["print_type","Print type"],
     ["units","Units sold"],["online_units","Online"],["store_units","Store"],["orders","Orders"],["first_sale","First sale"],["last_sale","Last sale"],
     [x=>(+st(x).store_on_hand||0)+(+st(x).wh_on_hand||0),"On hand"],[x=>+st(x).store_on_hand||0,"Stores on hand"],[x=>+st(x).wh_on_hand||0,"Warehouse on hand"],[x=>+st(x).intransit||0,"In transit"],[x=>+st(x).in_production||0,"In production"],[x=>+st(x).vir_store||0,"Vir-store"]], S._prodRows||[]); };
 

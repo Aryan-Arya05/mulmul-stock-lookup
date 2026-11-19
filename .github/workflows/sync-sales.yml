@@ -42,6 +42,11 @@ jobs:
           SUPABASE_URL: https://idhtjxirqvaensqhozdc.supabase.co
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SYNC_SHEET_SALES: ${{ inputs.sheet_sales == true && '1' || '' }}
+      - name: Product attributes (data/product_attributes.csv) -> product_attributes
+        run: node scripts/load-product-attributes.mjs
+        env:
+          SUPABASE_URL: https://idhtjxirqvaensqhozdc.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       - name: Vinculum orders -> sale_lines
         if: ${{ inputs.skip_vinculum != true }}
         run: node scripts/sync-sales-vinculum.mjs

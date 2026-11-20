@@ -98,6 +98,37 @@ async function fetchWhWindow(from, to, locSeen, buckets) {
   return [...agg.values()];
 }
 
+// Full mode: explicit-SKU lookups for EVERY SKU in `products` (date windows miss stock that hasn't moved).
+async function fetchWhExplicit(allSkus, onProgress) {
+  const locSeen = new Map(), buckets = new Map(), agg = new Map();
+  let batch = Number(process.env.WH_FULL_BATCH || 200), i = 0, calls = 0;
+  while (i < allSkus.length) {
+    const chunk = allSkus.slice(i, i + batch);
+    let data;
+    try {
+      data = await vin("v4/stock/getWhInventory", { skuCodes: chunk, buckets: [], fromDate: "", toDate: "", pageNumber: "1", reqType: "", locCode: "" });
+    } catch (e) {
+      if (batch > 20 && !/quota/i.test(e.message)) { batch = Math.max(20, Math.floor(batch / 2)); log(`explicit batch rejected (${e.message.slice(0, 120)}); batch -> ${batch}`); continue; }
+      throw e;
+    }
+    calls++;
+    for (const r of data.response || []) {
+      locSeen.set(r.location, (locSeen.get(r.location) || 0) + 1);
+      buckets.set(r.bucket, (buckets.get(r.bucket) || 0) + 1);
+      if (String(r.bucket).toLowerCase() !== "good") continue;
+      const qty = Math.max(0, Math.round(Number(r.qty || 0) - Number(r.committedQty || 0)));
+      const sku = String(r.skuCode).trim().toUpperCase(), k = `${sku}|${r.location}`;
+      const prev = agg.get(k);
+      if (prev) prev.qty += qty; else agg.set(k, { sku, location_code: r.location, bin: "", qty });
+    }
+    if (data.hasMore) log(`WARNING: hasMore on explicit batch at ${i} (batch ${batch}); some rows may be missed`);
+    i += chunk.length;
+    if (onProgress) await onProgress(`full WH: ${i}/${allSkus.length} SKUs, ${calls} calls, in-stock pairs ${[...agg.values()].filter(r => r.qty > 0).length}`);
+  }
+  if (onProgress) await onProgress(`full WH done: ${allSkus.length} SKUs in ${calls} calls; locations ${JSON.stringify(Object.fromEntries(locSeen))}; buckets ${JSON.stringify(Object.fromEntries(buckets))}`, true);
+  return [...agg.values()].filter(r => r.qty > 0);
+}
+
 async function fetchWhInventory(backfillDays, onWindow) {
   const locSeen = new Map(), buckets = new Map();
   const merged = new Map();            // later windows overwrite earlier ones
@@ -194,9 +225,18 @@ try {
 
   const backfillDays = Number(process.env.BACKFILL_DAYS || 0);
   log(backfillDays ? `BACKFILL ${backfillDays} days` : "incremental: last 7 days");
-  const inv = await fetchWhInventory(backfillDays, async (rows, msg, force) => {
-    await progress(msg, force);
-  });
+  const fullWh = !!process.env.WH_FULL;
+  let inv;
+  if (fullWh) {
+    const allSkus = [];
+    for (let off = 0; ; off += 10000) { const rows = await sb(`products?select=sku&order=sku&offset=${off}&limit=10000`); rows.forEach(r => allSkus.push(r.sku)); if (rows.length < 10000) break; }
+    log(`FULL WH refresh over ${allSkus.length} SKUs`);
+    inv = await fetchWhExplicit(allSkus, (msg, force) => progress(msg, force));
+  } else {
+    inv = await fetchWhInventory(backfillDays, async (rows, msg, force) => {
+      await progress(msg, force);
+    });
+  }
   const unknown = [...new Set(inv.filter(r => !knownLocs.has(r.location_code)).map(r => r.location_code))];
   if (unknown.length) log("WARNING: inventory rows for locations not in master, skipped:", unknown);
   const invRows = inv.filter(r => knownLocs.has(r.location_code) && r.location_code !== "OPT").map(r => ({ ...r, synced_at: runStart }));
@@ -257,6 +297,14 @@ try {
     await sb(`inventory?location_code=eq.${loc}&bin=not.in.(${[...VIRT, "PHYSICAL"].map(b => `"${b}"`).join(",")})&sku=in.(${chunk.map(s => `"${s}"`).join(",")})`, { method: "DELETE", prefer: "return=minimal" });
   }
   if (backfillDays) log("backfill mode: no purge (base comes from load-base)");
+  if (fullWh) {
+    // every SKU was looked up explicitly, so any warehouse PHYSICAL row not refreshed in this run is sold out
+    const whLocs = [...new Set(physRows.map(r => r.location_code))].filter(l => l !== "OPT");
+    for (const loc of [...new Set([...whLocs, "MNW", "MWH"])]) {
+      await sb(`inventory?location_code=eq.${loc}&bin=eq.PHYSICAL&synced_at=lt.${encodeURIComponent(runStart)}`, { method: "DELETE", prefer: "return=minimal" });
+    }
+    log("full mode: purged warehouse PHYSICAL rows not seen in this run");
+  }
   await sb(`sync_runs?id=eq.${run.id}`, { method: "PATCH", body: { status: "ok", finished_at: new Date().toISOString(), rows_upserted: invRows.length, error: skuWarn } });
   await fetch(`${SUPABASE_URL}/functions/v1/publish-snapshot`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).catch(e => log("snapshot publish skipped:", e.message));
   log("done");

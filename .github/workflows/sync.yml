@@ -10,6 +10,10 @@ on:
         description: "Backfill: walk back this many days (0 = incremental last 7 days)"
         type: string
         default: "0"
+      wh_full:
+        description: "Full warehouse refresh: look up every SKU explicitly (catches stock the date window misses)"
+        type: boolean
+        default: false
 concurrency: { group: vinculum-sync, cancel-in-progress: false }
 jobs:
   sync:
@@ -28,3 +32,4 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           FULL_SKU_REFRESH: ${{ inputs.full_sku_refresh == true && '1' || '' }}
           BACKFILL_DAYS: ${{ inputs.backfill_days || '0' }}
+          WH_FULL: ${{ inputs.wh_full == true && '1' || '' }}

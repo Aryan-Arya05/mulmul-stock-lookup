@@ -229,8 +229,9 @@ try {
   let inv;
   if (fullWh) {
     const allSkus = [];
-    for (let off = 0; ; off += 10000) { const rows = await sb(`products?select=sku&order=sku&offset=${off}&limit=10000`); rows.forEach(r => allSkus.push(r.sku)); if (rows.length < 10000) break; }
+    for (let off = 0; ; off += 1000) { const rows = await sb(`products?select=sku&order=sku&offset=${off}&limit=1000`); rows.forEach(r => allSkus.push(r.sku)); if (rows.length < 1000) break; }   // PostgREST caps at 1000 rows
     log(`FULL WH refresh over ${allSkus.length} SKUs`);
+    if (allSkus.length < 20000) throw new Error(`full WH refresh aborted: only ${allSkus.length} SKUs loaded from products`);
     inv = await fetchWhExplicit(allSkus, (msg, force) => progress(msg, force));
   } else {
     inv = await fetchWhInventory(backfillDays, async (rows, msg, force) => {

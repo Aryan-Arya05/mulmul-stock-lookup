@@ -1,6 +1,6 @@
 # Mulmul sales, replenishment & production dashboard
 
-Live at `https://aryan-arya05.github.io/mulmul-stock-lookup/sales/`. Same Supabase project as the stock lookup
+Live at https://sales.mulmul.co/. The page itself lives in the `Aryan-Arya05-mulmul-sales-dashboard` repo; `sales/index.html` here only forwards to it. Same Supabase project as the stock lookup
 (`idhtjxirqvaensqhozdc`).
 
 **Access:** people sign in with their Mulmul Threads account. Every data request goes through the `dash` edge function

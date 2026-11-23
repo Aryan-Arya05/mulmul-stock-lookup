@@ -113,6 +113,9 @@ async function runSql(sql: string) {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "POST only" }, 405);
+  // Only the dash gateway may call this: it has already checked the person's Mulmul Threads access.
+  const bearer = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
+  if (bearer !== SERVICE_KEY) return json({ error: "Sign in to the dashboard to use Ask." }, 401);
   if (!ANTHROPIC_API_KEY) return json({ error: "ANTHROPIC_API_KEY is not set in the edge function secrets" }, 500);
   let body: { question?: string; history?: { role: string; content: string }[] };
   try { body = await req.json(); } catch { return json({ error: "bad json" }, 400); }

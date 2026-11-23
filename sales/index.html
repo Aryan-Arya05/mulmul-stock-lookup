@@ -110,9 +110,44 @@ svg text{font-family:var(--sans);font-size:11px;fill:var(--muted)}
 .muted{color:var(--muted)}
 .right{margin-left:auto}
 @media (max-width:700px){.timeline{grid-template-columns:repeat(2,1fr)}}
+
+#gate{position:fixed;inset:0;z-index:100;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:24px;overflow:auto}
+#gate[hidden]{display:none}
+#gate .box{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:26px 24px;width:100%;max-width:380px}
+#gate h1{font-size:20px;margin:2px 0 6px}
+#gate .eyebrow{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:600}
+#gate p{color:var(--muted);font-size:13.5px;margin:0 0 14px}
+#gate label{display:block;font-size:12.5px;font-weight:600;margin:10px 0 4px}
+#gate input{width:100%;font:inherit;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:var(--card);color:var(--fg)}
+#gate button{width:100%;font:inherit;font-weight:600;cursor:pointer;border-radius:9px;padding:10px 12px;margin-top:14px;border:1px solid var(--fg);background:var(--fg);color:var(--bg)}
+#gate button.alt{background:transparent;color:var(--fg);border-color:var(--line);margin-top:8px}
+#gate button[hidden],#gate form[hidden],#gate .or[hidden]{display:none}
+#gate button:disabled{opacity:.6;cursor:default}
+#gate .or{text-align:center;font-size:12px;color:var(--muted);margin:12px 0 0}
+#gate .msg{font-size:13px;margin-top:12px;min-height:18px;color:#b3261e}
+.whoami{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);white-space:nowrap}
+.whoami button{font:inherit;font-size:12px;cursor:pointer;border:1px solid var(--line);background:none;color:var(--fg);border-radius:999px;padding:3px 10px}
 </style>
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
 </head>
 <body>
+<div id="gate">
+  <div class="box">
+    <div class="eyebrow">Mulmul</div>
+    <h1>Sales · Replenishment · Production</h1>
+    <p id="gateLead">Sign in with your Mulmul Threads account.</p>
+    <form id="gateForm" autocomplete="on">
+      <label for="gateEmail">Email</label><input id="gateEmail" type="email" name="email" autocomplete="username" required>
+      <label for="gatePass">Password</label><input id="gatePass" type="password" name="password" autocomplete="current-password" required>
+      <button type="submit" id="gateGo">Sign in</button>
+    </form>
+    <div class="or" id="gateOr">or</div>
+    <button type="button" class="alt" id="gateGoogle">Continue with Google</button>
+    <button type="button" class="alt" id="gateOut" hidden>Sign out</button>
+    <div class="msg" id="gateMsg" role="alert"></div>
+  </div>
+</div>
 <header><div class="bar">
   <div class="brand">Mulmul <small>Sales · Replenishment · Production</small></div>
   <nav>
@@ -126,6 +161,7 @@ svg text{font-family:var(--sans);font-size:11px;fill:var(--muted)}
     <button data-tab="ask">Ask</button>
   </nav>
   <div class="fresh" id="fresh"></div>
+  <div class="whoami"><span id="who"></span><button type="button" id="whoOut">Sign out</button></div>
 </div></header>
 <main>
   <section id="overview" class="on">
@@ -251,10 +287,13 @@ svg text{font-family:var(--sans);font-size:11px;fill:var(--muted)}
 <div class="drawer" id="drawer"></div>
 <div class="tip" id="tip"></div>
 
+<script src="vendor/supabase.js?v=2.119.0"></script>
 <script>
 const SUPABASE_URL = "https://idhtjxirqvaensqhozdc.supabase.co";
-const SUPABASE_KEY = "sb_publishable_AQumcF8aqgNNdrOtSCp4Ig_fBJWSnEK";
-const ASK_URL = `${SUPABASE_URL}/functions/v1/ask-sales`;
+const DASH_URL = `${SUPABASE_URL}/functions/v1/dash`;
+const THREADS_URL = "https://zcnthnhdwdtxalijrcik.supabase.co";            // sign-in is the Mulmul Threads account
+const THREADS_KEY = "sb_publishable_FWivcWTl1QYFEXl5A6akMA_V2hbQcSD";
+const sb = supabase.createClient(THREADS_URL, THREADS_KEY);
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const n0 = v => v == null ? "–" : Math.round(Number(v)).toLocaleString("en-IN");
@@ -262,16 +301,29 @@ const n1 = v => v == null ? "–" : Number(v).toLocaleString("en-IN",{maximumFra
 const d = v => { if(!v) return "–"; const x=new Date(v); return x.toLocaleDateString("en-IN", x.getFullYear()===new Date().getFullYear() ? {day:"numeric",month:"short"} : {day:"numeric",month:"short",year:"2-digit"}); };
 const title = s => String(s||"").toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
 
+// Every data request goes through the "dash" gateway with the person's Mulmul Threads sign-in.
+// The gateway checks in Threads that this person may open the dashboard before it returns anything.
+async function token(){
+  const { data } = await sb.auth.getSession();
+  if(!data || !data.session){ showGate("signin"); throw new Error("Sign in again to continue"); }
+  return data.session.access_token;
+}
+async function dash(body){
+  const r = await fetch(DASH_URL, { method:"POST", headers:{ "Content-Type":"application/json", Authorization:`Bearer ${await token()}` }, body: JSON.stringify(body) });
+  if(r.status === 401) showGate("signin", "Your sign-in has expired. Sign in again.");
+  if(r.status === 403) showGate("denied");
+  return r;
+}
 async function q(path){
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } });
+  const r = await dash({ op:"rest", path });
   if(!r.ok) throw new Error(`${path}: ${r.status} ${await r.text()}`);
   return r.json();
 }
 async function rpc(name, args={}, attempt=1){
   // Retries once on a statement timeout / transient 5xx (the database can be mid-refresh) before surfacing an error.
   let r;
-  try { r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${name}`, { method:"POST", headers:{ apikey:SUPABASE_KEY, Authorization:`Bearer ${SUPABASE_KEY}`, "Content-Type":"application/json" }, body: JSON.stringify(args) }); }
-  catch(e){ if(attempt<3){ await new Promise(r=>setTimeout(r, 1500*attempt)); return rpc(name, args, attempt+1); } throw e; }
+  try { r = await dash({ op:"rpc", name, args }); }
+  catch(e){ if(attempt<3 && !/Sign in/.test(e.message)){ await new Promise(r=>setTimeout(r, 1500*attempt)); return rpc(name, args, attempt+1); } throw e; }
   if(!r.ok){
     const text = await r.text();
     if(attempt<3 && (r.status>=500 || r.status===408 || /57014|timeout/i.test(text))){ await new Promise(r=>setTimeout(r, 1500*attempt)); return rpc(name, args, attempt+1); }
@@ -279,15 +331,14 @@ async function rpc(name, args={}, attempt=1){
   }
   return r.json();
 }
-// Static snapshot files (published to Storage/CDN after every rebuild). Falls back to the live query if a file is missing.
-const SNAP = `${SUPABASE_URL}/storage/v1/object/public/dashboard`;
+// Snapshot files (rebuilt after every refresh). Falls back to the live query if a file is missing.
 async function snap(name, fallback){
-  try { const r = await fetch(`${SNAP}/${name}.json?t=${Math.floor(Date.now()/60000)}`); if(r.ok) return await r.json(); } catch(e){}
+  try { const r = await dash({ op:"snap", name }); if(r.ok) return await r.json(); } catch(e){}
   return fallback();
 }
-async function qAll(path, page=1000){ // page through PostgREST (server caps at 1000 rows per request)
+async function qAll(path, page=1000){ // page through the rows (the server caps at 1000 per request)
   let out=[], from=0;
-  for(;;){ const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { headers:{ apikey:SUPABASE_KEY, Authorization:`Bearer ${SUPABASE_KEY}`, Range:`${from}-${from+page-1}`, Prefer:"count=none" } });
+  for(;;){ const r = await dash({ op:"rest", path, range:`${from}-${from+page-1}` });
     if(!r.ok) throw new Error(`${path}: ${r.status}`); const rows = await r.json(); out.push(...rows); if(rows.length<page) return out; from+=page; }
 }
 
@@ -773,7 +824,7 @@ async function ask(){
   const box = document.createElement("div"); box.className="ans"; box.innerHTML = `<div class="q">${esc(question)}</div><div class="a muted">Investigating — running queries, this takes 20–60 s…</div>`;
   $("#answers").prepend(box); $("#askIn").value="";
   try {
-    const r = await fetch(ASK_URL, { method:"POST", headers:{ "Content-Type":"application/json", apikey:SUPABASE_KEY, Authorization:`Bearer ${SUPABASE_KEY}` }, body: JSON.stringify({ question, history: hist.slice(-4) }) });
+    const r = await dash({ op:"ask", payload:{ question, history: hist.slice(-4) } });
     const data = await r.json();
     if(data.error){ box.innerHTML = `<div class="q">${esc(question)}</div><div class="a err">${esc(data.error)}</div>${data.sql?`<details><summary>SQL</summary><pre>${esc(data.sql)}</pre></details>`:""}`; return; }
     hist.push({role:"user",content:question},{role:"assistant",content:data.answer});
@@ -905,7 +956,34 @@ document.querySelector('nav button[data-tab="aging"]').addEventListener("click",
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => { document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("on",x===b)); document.querySelectorAll("main section").forEach(s=>s.classList.toggle("on",s.id===b.dataset.tab)); location.hash=b.dataset.tab; });
 function goHash(){ const b=document.querySelector(`nav button[data-tab="${location.hash.slice(1)}"]`); if(b && !b.classList.contains("on")) b.click(); }
 window.addEventListener("hashchange", goHash); goHash();
-load().catch(e => { $("#launchCards").innerHTML = `<div class="empty err">${esc(e.message)}</div>`; });
+// ---------- sign-in gate ----------
+let started = false;
+function showGate(mode, msg){
+  const denied = mode === "denied";
+  $("#gate").hidden = false; $("#gateForm").hidden = denied; $("#gateGoogle").hidden = denied; $("#gateOr").hidden = denied; $("#gateOut").hidden = !denied;
+  $("#gateLead").textContent = denied ? "You are signed in, but this dashboard has not been shared with you. Ask an admin to give you access in Mulmul Threads (Admin, People & access)." : "Sign in with your Mulmul Threads account.";
+  $("#gateMsg").textContent = msg || "";
+}
+async function enter(session){
+  if(started){ $("#gate").hidden = true; return; }
+  let r;
+  try { r = await fetch(DASH_URL, { method:"POST", headers:{ "Content-Type":"application/json", Authorization:`Bearer ${session.access_token}` }, body: JSON.stringify({ op:"whoami" }) }); }
+  catch(e){ return showGate("signin", "Could not reach the server. Check your connection and try again."); }
+  if(r.status === 403) return showGate("denied");
+  if(!r.ok) return showGate("signin", r.status === 401 ? "" : "Could not check your access. Try again in a minute.");
+  if(started) return;
+  started = true; $("#gate").hidden = true; $("#who").textContent = session.user.email || "";
+  if(location.hash.includes("access_token")) history.replaceState(null, "", location.pathname);
+  load().catch(e => { $("#launchCards").innerHTML = `<div class="empty err">${esc(e.message)}</div>`; });
+}
+$("#gateForm").onsubmit = async e => { e.preventDefault(); $("#gateMsg").textContent = ""; $("#gateGo").disabled = true;
+  const { error } = await sb.auth.signInWithPassword({ email: $("#gateEmail").value.trim(), password: $("#gatePass").value });
+  $("#gateGo").disabled = false; if(error) $("#gateMsg").textContent = /invalid/i.test(error.message) ? "Email or password is not right." : error.message; };
+$("#gateGoogle").onclick = async () => { $("#gateMsg").textContent = ""; const { error } = await sb.auth.signInWithOAuth({ provider:"google", options:{ redirectTo: location.origin + location.pathname } }); if(error) $("#gateMsg").textContent = error.message; };
+const signOut = async () => { await sb.auth.signOut(); location.reload(); };
+$("#gateOut").onclick = signOut; $("#whoOut").onclick = signOut;
+sb.auth.onAuthStateChange((ev, session) => { if(session) setTimeout(() => enter(session), 0); else if(!started) showGate("signin"); });
+sb.auth.getSession().then(({ data }) => { if(data && data.session) enter(data.session); else showGate("signin"); });
 </script>
 </body>
 </html>

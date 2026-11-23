@@ -1,7 +1,12 @@
 # Mulmul sales, replenishment & production dashboard
 
 Live at `https://aryan-arya05.github.io/mulmul-stock-lookup/sales/`. Same Supabase project as the stock lookup
-(`idhtjxirqvaensqhozdc`); reads with the publishable key.
+(`idhtjxirqvaensqhozdc`).
+
+**Access:** people sign in with their Mulmul Threads account. Every data request goes through the `dash` edge function
+(`supabase/functions/dash`), which checks in Threads that the person may open the `sales` dashboard and then reads with the
+service key. Access is given in Threads under Admin, People & access. The sales tables, views, snapshot files and the
+`ask-sales` function are closed to the public key; the stock lookup app's tables stay open.
 
 ## Data flow
 

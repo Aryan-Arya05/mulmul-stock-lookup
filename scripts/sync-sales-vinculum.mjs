@@ -416,6 +416,8 @@ try {
   // A manual FROM_DATE/TO_DATE re-pull of an old range must never move the incremental watermark backwards.
   const [cur] = await sb("sync_state?job=eq.vinculum_orders&select=watermark");
   const keep = cur?.watermark && new Date(cur.watermark) > to;
+  // SKUs sold before any stock was booked (pre-orders on a launch) get a product stub so the stock sync fetches their details.
+  await sb("rpc/stub_products_for_sold_skus", { method: "POST", body: {} }).then(n => n && log(`stubbed ${n} sold SKUs missing from products`)).catch(e => log("stub products skipped:", e.message.slice(0, 120)));
   await setState({ status: "ok", ...(keep ? {} : { watermark: to.toISOString() }), last_run: new Date().toISOString(), detail: `wrote ${total} lines; window ${fmtIST(from)} -> ${fmtIST(to)}${skippedDays.length ? `; skipped days: ${skippedDays.join(",")}` : ""}` });
   await fetch(`${SUPABASE_URL}/functions/v1/publish-snapshot`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).catch(e => log("snapshot publish skipped:", e.message));
   log(`done: ${total} lines; views refreshed`);

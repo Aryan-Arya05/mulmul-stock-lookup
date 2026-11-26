@@ -1,0 +1,25 @@
+name: Sync order sources (Shopify)
+on:
+  workflow_dispatch:
+    inputs:
+      backfill: { description: "1 = walk back through history (resumable)", default: "" }
+      backfill_from: { description: "Oldest order date to load (YYYY-MM-DD)", default: "2026-01-01" }
+      lookback_days: { description: "Incremental lookback in days", default: "7" }
+concurrency: { group: order-sources, cancel-in-progress: false }
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: node scripts/sync-order-sources.mjs
+        env:
+          SHOPIFY_STORE: shopmulmul.myshopify.com
+          SHOPIFY_ACCESS_TOKEN: ${{ secrets.SHOPIFY_ACCESS_TOKEN }}
+          SUPABASE_URL: https://idhtjxirqvaensqhozdc.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          BACKFILL: ${{ inputs.backfill }}
+          BACKFILL_FROM: ${{ inputs.backfill_from }}
+          LOOKBACK_DAYS: ${{ inputs.lookback_days }}

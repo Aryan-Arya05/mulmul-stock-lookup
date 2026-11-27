@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     paths: ["data/**"]
-concurrency: { group: vinculum-sync, cancel-in-progress: false }
+concurrency: { group: load-base, cancel-in-progress: false }
 jobs:
   load:
     runs-on: ubuntu-latest

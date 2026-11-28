@@ -14,7 +14,7 @@ const ORIGINS = new Set(["https://aryan-arya05.github.io", "https://sales.mulmul
 const RPCS = new Set(["dashboard_inward_stores", "dashboard_inwards", "dashboard_period", "dashboard_period_daily", "dashboard_products",
   "dashboard_stock_aging", "dashboard_stock_aging_detail", "dashboard_stock_intransit", "dashboard_stock_transfers",
   "dashboard_store_totals", "dashboard_stores", "dashboard_weekly", "dashboard_dist_overview_cached", "dashboard_dist_plan",
-  "dashboard_store", "dashboard_store_matrix", "dashboard_sku_store_matrix", "dashboard_sets"]);
+  "dashboard_store", "dashboard_store_matrix", "dashboard_sku_store_matrix", "dashboard_sets", "dashboard_set_fill"]);
 const VIEWS = new Set(["v_daily_style_colour", "v_size_style_colour", "v_stock_sku", "v_store_style_colour", "v_weekly_style_colour",
   "v_replenishment_formula", "v_launch_summary", "sync_state", "settings"]);
 const SNAPS = new Set(["launches", "products", "replenishment", "store_totals", "sync", "weekly"]);
